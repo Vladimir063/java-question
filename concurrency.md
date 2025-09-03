@@ -1121,42 +1121,83 @@ class QueueReentrantLock<T> {
     }
 }
 ```
-## Что такое happens-before и как это влияет на volatile и final?
-Что такое happens‑before? Это правило, которое гарантирует: если одна операция happens‑before другой, то все эффекты первой будут видны второй. То есть не просто выполнено раньше, а видно в памяти. В многопоточности каждый поток может жить в своей версии реальности, с кешами, reorder‑оптимизациями и прочими сюрпризами
-Volatile — простая гарантия видимости:
+# 1) **Happens-before — простыми словами**
 
-public class VolatileFlag {
-    private volatile boolean flag = false;
+**Кратко и чисто:**  
+*happens-before* — это правило, которое говорит: если одно действие **A** *happens-before* другое действие **B**, то все изменения, сделанные в A, гарантированно **видны** в B и A не может быть "переупорядочено" так, чтобы выглядеть как происходящее после B.
 
-    public void writer() {
-        flag = true;
-    }
+Представь: поток 1 положил письмо в почтовый ящик и закрыл крышку. Поток 2 открывает крышку и смотрит в ящик. Правило *happens-before* гарантирует, что если закрытие крышки (A) произошло "до" открытия крышки (B), то письмо будет видно.
 
-    public void reader() {
-        if (flag) {
-            System.out.println("Флаг сработал!");
+**Простые способы (правила), которые дают happens-before:**
+1. Действия внутри одного потока идут в порядке программы — то есть инструкции в одном методе имеют порядок (program order).
+2. Запись в `volatile` переменную → чтение той же `volatile` переменной (volatile write -> volatile read) — это даёт видимость.
+3. `synchronized` блоки: `unlock` монитора в одном потоке → `lock` того же монитора в другом потоке.
+4. `Thread.start()` — всё, что произошло до `start()` в главном потоке, видно новому потоку; и наоборот, всё, что сделал поток, *happens-before* возвращению `join()` в другом потоке.
+5. Правила для `final` полей при корректной публикации объекта.
+
+**Почему это важно (на примерах):**
+
+Проблема: без таких правил один поток может **не увидеть** изменения другого.
+
+Простой пример, где может быть баг:
+
+```java
+// Пример: Reader может не увидеть присвоение data = 42
+class FlagExample {
+    static boolean ready = false; // НЕ volatile
+    static int data = 0;
+
+    static class Writer extends Thread {
+        public void run() {
+            data = 42;      // (1) записали данные
+            ready = true;   // (2) отметили "готово"
         }
     }
-Когда переменная volatile, запись в неё happens‑before любому последующему чтению. То есть гарантируется не только видимость, но и что всё, что было до записи, станет видно второму потоку.
 
-Final — публикация объекта без лишнего
-
-Если правильно публикуем объект (а именно: не даёшь this утечь из конструктора), то финальные поля будут видны корректно:
-
-public class ImmutableThing {
-    private final int value;
-
-    public ImmutableThing(int v) {
-        this.value = v;
+    static class Reader extends Thread {
+        public void run() {
+            if (ready) {                // (3) прочитали флаг
+                System.out.println(data); // может напечатать 0, а не 42
+            }
+        }
     }
 
-    public int getValue() {
-        return value;
+    public static void main(String[] args) {
+        new Writer().start();
+        new Reader().start();
     }
 }
-Если объект создаётся, и потом ссылка на него попадает в другой поток — поля final внутри него будут корректны. Но только если конструктор не вызывает start(), не кладёт this в статику и т. д.
+```
 
-Без happens‑before гарантии можно увидеть частично инициализированный объект. Классика: null вместо List, 0 вместо значения, и ночной кошмар дебага.
+**Почему это может вывести 0, а не 42:** без `volatile` или синхронизации JVM/процессор могут переупорядочить операции или кэшировать значения; в результате поток Reader может увидеть `ready == true`, но не увидеть обновлённый `data`.
+
+**Как исправить (два простых варианта):**
+
+1) Использовать `volatile`:
+```java
+static volatile boolean ready = false;
+static int data = 0;
+```
+`volatile` гарантирует `write -> read` hb: когда Writer записал `ready = true`, это делает видимым предыдущую запись `data = 42` для читателей, которые увидят `ready == true`.
+
+2) Использовать `synchronized`:
+```java
+synchronized(lock) {
+    data = 42;
+    ready = true;
+}
+```
+и в Reader:
+```java
+synchronized(lock) {
+    if (ready) {
+        System.out.println(data);
+    }
+}
+```
+`unlock` -> `lock` даёт happens-before и обеспечивает видимость.
+
+---
 
 ___________-
 
@@ -1319,197 +1360,375 @@ public class SingleCoreDemo {
 
 # 4) **Все синхронизаторы в пакете `java.util.concurrent` (и `java.util.concurrent.locks`) — зачем, как работает, примеры**  
 
-Я перечислю и коротко разберу **основные** синхронизаторы/утилиты, которые обычно ожидают на собеседовании. Многие из них реализованы поверх **AbstractQueuedSynchronizer (AQS)** — общей основы для реализации семафоров/замков/барьеров (описание AQS ниже).
+бщая идея: синхронизаторы — это готовые инструменты, которые решают стандартные задачи координации потоков: ждать завершения группы задач, ограничивать доступ к ресурсу, синхронно обмениваться данными и т.д. Большинство классических синхронизаторов в Java реализованы поверх **AbstractQueuedSynchronizer (AQS)** — внутреннего каркаса, который хранит состояние (`state`) и FIFO-очередь ожидающих потоков. AQS управляет очередью, паркингом (park/unpark) и манипуляцией `state` (обычно через CAS).
+
+Далее — разбор популярных синхронизаторов с пояснениями *как они работают пошагово* и наглядными примерами.
 
 ---
 
-## 4.1 **AbstractQueuedSynchronizer (AQS)** — фундамент
-**Назначение:** каркас для построения синхронизаторов на базе очереди ожидания. Имеет `state` (int) + очередь потоков, поддерживает режимы exclusive/shared. На его основе реализованы `ReentrantLock`, `Semaphore`, `CountDownLatch` и др.
+## Semaphore — ограничитель числа одновременных доступов
 
-**Как работает (упрощённо):**  
-- В AQS есть атомарное поле `state` и FIFO-очередь ожидающих потоков.  
-- Для эксклюзивных акций (замки) поток пытается захватить `state` (CAS). Если не вышло — встаёт в очередь и блочится (park). При освобождении — непременно оповещаются/разблокируются следующие.  
-- Shared режим (например Semaphore) позволяет нескольким потокам захватывать синхронизатор одновременно (уменьшая `state`).
+**Назначение:** держать N разрешений (permits). `acquire()` захватывает одно разрешение (если доступно) или блокирует поток до освобождения; `release()` возвращает разрешение.
 
----
+**Когда использовать:** пул соединений, ограничение параллельности допустимых операций.
 
-## 4.2 **`Semaphore`**  
-**Зачем:** ограничивает число одновременно выполняемых «допусков» — как счётчик разрешений. Полезно для пулов соединений, ограничений доступа.
+**Пошагово (что происходит при вызове):**
+1. Внутренне хранится счётчик `permits`.
+2. `acquire()` пытается уменьшить счётчик атомарно.  
+   - Если получилось — поток проходит дальше.  
+   - Если счётчик < 1 — поток встаёт в очередь ожидания (AQS) и блокируется.
+3. `release()` увеличивает счётчик и разблокирует один (или всех) ожидающих, если они есть.
 
-**Как работает:** имеет счётчик permits (`state` в AQS). `acquire()` уменьшает счётчик; если стало <0 — поток блокируется; `release()` увеличивает и разблокирует ожидателей. Может быть fair/unfair.
-
-**Пример:**
+**Простой наглядный пример + комментарии о результате:**
 ```java
 import java.util.concurrent.Semaphore;
 
-public class SemaphoreExample {
-    private final Semaphore sem = new Semaphore(2); // максимум 2 одновременно
+public class SemaphoreDemo {
+    public static void main(String[] args) {
+        // 2 разрешения — одновременно максимум 2 потока могут "использовать" ресурс
+        Semaphore sem = new Semaphore(2);
 
-    public void useResource() {
-        try {
-            sem.acquire(); // получить разрешение
-            // критическая секция: доступ к ресурсу
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            sem.release(); // вернуть разрешение
+        Runnable worker = () -> {
+            String name = Thread.currentThread().getName();
+            try {
+                System.out.println(name + " пытается получить разрешение");
+                sem.acquire(); // пытаемся получить разрешение; если нет — блокируемся
+                System.out.println(name + " получил разрешение и входит в критическую секцию");
+                // симулируем работу в критической секции
+                Thread.sleep(1000);
+                System.out.println(name + " уходит из критической секции и освобождает разрешение");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                sem.release(); // обязательно вернуть разрешение
+            }
+        };
+
+        // Запускаем 5 потоков; одновременно будут выполняться только 2 из них
+        for (int i = 0; i < 5; i++) {
+            new Thread(worker, "Worker-" + i).start();
+        }
+    }
+}
+```
+**Ожидаемый результат:**  
+- В начале первые два потока получат разрешение и войдут в секцию. Остальные будут ждать в очереди.  
+- Через ~1 секунду первые два освободят разрешения, и следующие два из очереди войдут в секцию и т.д.  
+Это наглядно показывает ограничение параллельности.
+
+---
+
+## CountDownLatch — ждать, пока N событий произойдёт (одноразовый)
+
+**Назначение:** главный поток ждёт, пока N рабочих потоков не завершат подготовку/работу. После того как счётчик дошёл до 0 — latch больше нельзя "перезапустить".
+
+**Как работает:**
+1. Создаём `CountDownLatch(N)`.
+2. Рабочие потоки по завершении своей части вызывают `countDown()`.
+3. Главный поток вызывает `await()` и блокируется до тех пор, пока счётчик не станет 0.
+4. Когда счётчик == 0 — все ожидающие разблокируются.
+
+**Пример и пояснение:**
+```java
+import java.util.concurrent.CountDownLatch;
+
+public class CountDownLatchDemo {
+    public static void main(String[] args) throws InterruptedException {
+        int workers = 3;
+        CountDownLatch latch = new CountDownLatch(workers);
+
+        // Запускаем 3 рабочих потока
+        for (int i = 0; i < workers; i++) {
+            final int id = i;
+            new Thread(() -> {
+                System.out.println("Worker " + id + " выполняет инициализацию");
+                try {
+                    Thread.sleep(500 + id * 200); // разное время инициализации
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                System.out.println("Worker " + id + " завершил инициализацию и вызывает countDown()");
+                latch.countDown(); // сигнализируем о завершении
+            }).start();
+        }
+
+        System.out.println("Главный поток ждёт, пока все работники вызовут countDown()");
+        latch.await(); // ждём, пока latch не станет 0
+        System.out.println("Все работники готовы — главный поток продолжает работу");
+    }
+}
+```
+
+**Ожидаемый результат:**  
+- Главный поток напечатает сообщение о ожидании; затем по мере завершения каждого воркера будут сообщения о `countDown()`.  
+- После третьего `countDown()` главный поток разблокируется и продолжит работу.
+
+---
+
+## CyclicBarrier — барьер для фиксированного числа участников (можно использовать повторно)
+
+**Назначение:** заставляет группу потоков ждать друг друга в точке синхронизации (барьере); после того как все пришли — барьер "срабатывает" и каждый участник продолжает. Барьер можно переиспользовать.
+
+**Как работает:**
+1. Создаём `CyclicBarrier(parties, barrierAction)` — `parties` потоков должны вызвать `await()`; опционально можно передать `Runnable`, который выполнится, когда барьер соберётся.
+2. Каждый поток вызывает `await()` и блокируется.
+3. Как только `parties` потоков вызовут `await()`, все они разблокируются одновременно и барьер сбрасывается (можно снова использовать).
+
+**Пример и что будет происходить:**
+```java
+import java.util.concurrent.CyclicBarrier;
+
+public class CyclicBarrierDemo {
+    public static void main(String[] args) {
+        int parties = 3;
+        // barrierAction выполнится в одном из потоков после прихода всех участников
+        CyclicBarrier barrier = new CyclicBarrier(parties, () -> System.out.println("Барьер сработал — все участники пришли"));
+
+        for (int i = 0; i < parties; i++) {
+            final int id = i;
+            new Thread(() -> {
+                try {
+                    System.out.println("Поток " + id + " выполняет часть работы перед барьером");
+                    Thread.sleep(300 + id * 200);
+                    System.out.println("Поток " + id + " достиг барьера и вызывает await()");
+                    barrier.await(); // ждём остальных
+                    System.out.println("Поток " + id + " прошёл барьер и выполняет следующую фазу");
+                } catch (Exception e) {
+                    Thread.currentThread().interrupt();
+                }
+            }).start();
         }
     }
 }
 ```
 
----
-
-## 4.3 **`CountDownLatch`**  
-**Зачем:** ждать, пока не произойдет N событий. Одноразовый — после исчерпания счётчика нельзя «сбросить». Часто используют для ожидания инициализации или завершения группы задач.
-
-**Как работает:** внутренний счётчик; `await()` блокирует, пока счётчик > 0; `countDown()` уменьшает счётчик; когда достигает 0 — все ожидающие разблокируются. Реализован без прямого использования Lock (внутри — AQS).
-
-**Пример:**
-```java
-import java.util.concurrent.CountDownLatch;
-
-CountDownLatch latch = new CountDownLatch(3);
-
-for (int i = 0; i < 3; i++) {
-    new Thread(() -> {
-        // do work
-        latch.countDown(); // сигнализируем что сделали работу
-    }).start();
-}
-
-latch.await(); // ждём, пока все 3 вызовут countDown()
-```
+**Ожидаемый результат:**  
+- Каждый поток выполнит первую фазу и вызовет `await()`. Когда последний поток вызовет `await()`, напечатается сообщение "Барьер сработал...", и затем все потоки продолжат вторую фазу.
 
 ---
 
-## 4.4 **`CyclicBarrier`**  
-**Зачем:** синхронизирует группу потоков в барьере — все участники ждут друг друга, после чего барьер сбрасывается и может быть использован снова. Отлично для фазированных вычислений.
+## Phaser — гибкий барьер с динамической регистрацией участников
 
-**Как работает:** каждый поток вызывает `await()` и блокируется; последний пришедший — разблокирует всех; опционально можно передать `Runnable` для запуска при срабатывании барьера. Может быть reuseable.
+**Назначение:** похож на `CyclicBarrier`, но:
+- Поддерживает динамическое добавление/удаление участников (`register` / `arriveAndDeregister`).
+- Подходит для фазированных задач, где число участников может меняться.
 
-**Пример:**
-```java
-import java.util.concurrent.CyclicBarrier;
-
-CyclicBarrier barrier = new CyclicBarrier(3, () -> System.out.println("Barrier tripped"));
-
-for (int i = 0; i < 3; i++) {
-    new Thread(() -> {
-        // часть работы
-        barrier.await(); // ждём остальных
-        // следующая фаза
-    }).start();
-}
-```
-
----
-
-## 4.5 **`Phaser`**  
-**Зачем:** более гибкая версия барьера/счётчика; позволяет динамически регистрировать/дерегистрировать участников, поддерживает фазы. Хорош для многопоточных фазированных вычислений с динамическими участниками.
-
-**Как работает:** похож на `CyclicBarrier` + `CountDownLatch` комбинированно, поддерживает `register()`/`arriveAndAwaitAdvance()`/`arriveAndDeregister()`.
-
-**Пример:**
+**Пример и поведение:**
 ```java
 import java.util.concurrent.Phaser;
 
-Phaser phaser = new Phaser(3); // 3 участника
+public class PhaserDemo {
+    public static void main(String[] args) {
+        Phaser phaser = new Phaser(1); // регистрируем главный поток
 
-for (int i = 0; i < 3; i++) {
-    new Thread(() -> {
-        // фаза 1 ...
-        phaser.arriveAndAwaitAdvance(); // ждём всех
-        // фаза 2 ...
-    }).start();
-}
-```
+        // Регистрируем 3 рабочих
+        for (int i = 0; i < 3; i++) {
+            phaser.register(); // увеличиваем число участников
+            final int id = i;
+            new Thread(() -> {
+                System.out.println("Worker " + id + " фаза 0");
+                phaser.arriveAndAwaitAdvance(); // ждём остальных
+                System.out.println("Worker " + id + " фаза 1");
+                phaser.arriveAndDeregister(); // финиш и снимаем регистрацию
+            }).start();
+        }
 
----
-
-## 4.6 **`Exchanger<V>`**  
-**Зачем:** позволяет паре потоков обменяться объектами; полезно, когда два потока должны синхронно обменяться данными.
-
-**Как работает:** `exchange(v)` блокируется, ожидая партнёра; когда есть второй `exchange(u)`, объекты меняются и оба разблокируются.
-
-**Пример:**
-```java
-Exchanger<String> ex = new Exchanger<>();
-
-// Thread A
-String fromA = "dataA";
-String fromB = ex.exchange(fromA); // waits for partner
-
-// Thread B
-String fromB = "dataB";
-String fromA = ex.exchange(fromB); // оба обменяются объектами
-```
-
----
-
-## 4.7 **`SynchronousQueue`**  
-**Зачем:** блокирующая очередь без внутренней емкости — каждый `put` ожидает `take`. Используется при handoff между producer/consumer, например в `ThreadPoolExecutor` с `new SynchronousQueue()`.
-
-**Как работает:** нет буфера — т.е. передача данных напрямую между producer и consumer. Может быть fair/unfair.
-
-**Пример:**
-```java
-SynchronousQueue<String> q = new SynchronousQueue<>();
-new Thread(() -> {
-    q.put("msg"); // ждёт пока кто-то возьмёт
-}).start();
-
-new Thread(() -> {
-    String s = q.take(); // ждёт пока кто-то положит
-}).start();
-```
-
----
-
-## 4.8 **Locks и Conditions (`java.util.concurrent.locks`)**  
-- **`ReentrantLock`** — альтернатива `synchronized` с дополнительными возможностями (fair mode, tryLock, lockInterruptibly, Conditions). Реализован через AQS.  
-- **`ReentrantReadWriteLock`** — позволяет множественные считывающие (read) замки и эксклюзивный write-замок. Хорош для структур, где много чтений и редких записей.  
-- **`StampedLock`** (Java 8) — высокопроизводительный lock с поддержкой оптимистического чтения (optimistic read stamp), улучшающий throughput в read-heavy сценариях; но API не reentrant и требует внимательного использования.
-
-**Примеры:**
-```java
-// ReentrantLock
-ReentrantLock lock = new ReentrantLock();
-lock.lock();
-try {
-    // критическая секция
-} finally {
-    lock.unlock();
-}
-
-// ReadWrite
-ReentrantReadWriteLock rw = new ReentrantReadWriteLock();
-rw.readLock().lock();
-try {
-   // много чтений
-} finally {
-   rw.readLock().unlock();
-}
-
-// StampedLock optimistic read
-StampedLock sl = new StampedLock();
-long stamp = sl.tryOptimisticRead();
-try {
-    // читаем поля
-    if (!sl.validate(stamp)) {
-        stamp = sl.readLock();
-        try {
-           // повторное чтение под реальным read-lock
-        } finally { sl.unlockRead(stamp); }
+        // главный поток тоже участвует в фазах
+        System.out.println("Главный поток ждёт фазу 0");
+        phaser.arriveAndAwaitAdvance(); // ожидаем, пока все зарегистрированные участники придут
+        System.out.println("Главный поток: фаза 0 завершена");
+        // можно ждать фазы 1, если нужно
+        phaser.arriveAndDeregister(); // главный выходит
     }
-} finally { /* если понадобилось */ }
+}
 ```
+
+**Ожидаемый результат:**  
+- Фазы будут синхронизированы; после того как все участники вызывают `arriveAndAwaitAdvance()`, фаза завершается и происходит переход к следующей. В отличие от `CyclicBarrier`, число участников можно менять.
 
 ---
 
-## 4.9 **`Future`, `CompletableFuture`, `ExecutorService`**  
-Это скорее абстракции/механизмы управления задачами и результатами, чем синхронизаторы в классическом смысле, но часто используются для синхронизации результата (get(), join()). `CompletableFuture` даёт реактивное композиционное API.
+## Exchanger — обмен данными между парой потоков
 
+**Назначение:** два потока могут встретиться и обменяться объектами один на один.
+
+**Как работает:**
+1. Один поток вызывает `exchange(obj)` и блокируется, пока не придёт второй поток.
+2. Второй поток вызывает `exchange(obj2)` — в этот момент объекты меняются и оба потока продолжают, получив объект партнёра.
+
+**Пример и что будет видно в выводе:**
+```java
+import java.util.concurrent.Exchanger;
+
+public class ExchangerDemo {
+    public static void main(String[] args) {
+        Exchanger<String> exchanger = new Exchanger<>();
+
+        new Thread(() -> {
+            try {
+                String mine = "Message from A";
+                System.out.println("A: отправил и ждёт обмена");
+                String other = exchanger.exchange(mine);
+                System.out.println("A: получил: " + other);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+
+        new Thread(() -> {
+            try {
+                String mine = "Message from B";
+                System.out.println("B: отправил и ждёт обмена");
+                String other = exchanger.exchange(mine);
+                System.out.println("B: получил: " + other);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+    }
+}
+```
+
+**Ожидаемый результат:**  
+- A и B оба напечатают, что отправили сообщение и ждут; затем каждый получит сообщение другого и напечатает его.
+
+---
+
+## SynchronousQueue — прямая передача данных между producer и consumer
+
+**Назначение:** это очередь нулевой ёмкости. `put` ожидает `take`, и наоборот. Используется в handoff сценариях (например внутренне в некоторых `ThreadPoolExecutor`).
+
+**Как работает:**  
+- Нет буфера. `put(x)` блокируется до тех пор, пока какой-то поток не вызовет `take()` — тогда данные напрямую передаются.
+
+**Пример:**
+```java
+import java.util.concurrent.SynchronousQueue;
+
+public class SynchronousQueueDemo {
+    public static void main(String[] args) {
+        SynchronousQueue<String> q = new SynchronousQueue<>();
+
+        new Thread(() -> {
+            try {
+                System.out.println("Producer: пытается положить сообщение");
+                q.put("Hello");
+                System.out.println("Producer: сообщение передано");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+
+        new Thread(() -> {
+            try {
+                Thread.sleep(500); // подождём, чтобы показать, что producer будет блокироваться
+                System.out.println("Consumer: вызывает take()");
+                String s = q.take();
+                System.out.println("Consumer: получил -> " + s);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
+    }
+}
+```
+
+**Ожидаемый результат:**  
+- Producer вызовет `put` и будет заблокирован до тех пор, пока consumer не вызовет `take()`. После 500 мс consumer вызовет `take()`, и передача произойдёт.
+
+---
+
+## ReentrantLock, ReentrantReadWriteLock, StampedLock — явно управляемые замки
+
+### ReentrantLock
+- Поведение похоже на `synchronized`, но даёт больше возможностей: `tryLock()`, `lockInterruptibly()`, `Condition` (аналог `wait/notify`), fairness (если включён).
+- Когда поток вызывает `lock()`:
+  1. Если замок свободен — поток захватывает его и продолжается.
+  2. Если занят — поток может блокироваться в очереди ожидания (AQS).
+- `unlock()` снимает захват и разблокирует следующий поток из очереди.
+
+**Пример с подробными комментариями:**
+```java
+import java.util.concurrent.locks.ReentrantLock;
+
+public class ReentrantLockDemo {
+    private final ReentrantLock lock = new ReentrantLock();
+
+    public void safeIncrement() {
+        lock.lock(); // попытка захватить замок (если свободен — сразу, иначе — ждать)
+        try {
+            // Критическая секция — только один поток здесь одновременно
+            System.out.println(Thread.currentThread().getName() + " в критической секции");
+            try { Thread.sleep(300); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        } finally {
+            lock.unlock(); // обязательно освободить замок в finally
+            System.out.println(Thread.currentThread().getName() + " освободил замок");
+        }
+    }
+
+    public static void main(String[] args) {
+        ReentrantLockDemo d = new ReentrantLockDemo();
+        for (int i = 0; i < 3; i++) {
+            new Thread(d::safeIncrement, "T" + i).start();
+        }
+    }
+}
+```
+
+**Ожидаемый результат:**  
+- Один поток заходит в критическую секцию, другие ждут; по завершении он освобождает замок — следующий поток входит.
+
+### ReentrantReadWriteLock
+- Дает два вида замков: `readLock()` (нескольким потокам одновременно разрешено читать) и `writeLock()` (только один поток на запись, и при записи никто другой не может читать).
+- Хорош для структур с частыми чтениями и редкими записями.
+
+**Короткий пример:**
+```java
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+public class ReadWriteDemo {
+    private final ReentrantReadWriteLock rw = new ReentrantReadWriteLock();
+    private int value = 0;
+
+    public void read() {
+        rw.readLock().lock();
+        try {
+            System.out.println(Thread.currentThread().getName() + " читает value=" + value);
+            try { Thread.sleep(200); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        } finally {
+            rw.readLock().unlock();
+        }
+    }
+
+    public void write(int v) {
+        rw.writeLock().lock();
+        try {
+            System.out.println(Thread.currentThread().getName() + " записывает " + v);
+            value = v;
+            try { Thread.sleep(300); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        } finally {
+            rw.writeLock().unlock();
+        }
+    }
+}
+```
+
+**Поведение:**  
+- Несколько читателей могут одновременно держать `readLock()`. Write-lock эксклюзивен.
+
+### StampedLock (оптимистическое чтение)
+- Предоставляет оптимистическое чтение: поток может читать без блокировки, получив "штамп" (`stamp = tryOptimisticRead()`), затем валидировать штамп `validate(stamp)`. Если в процессе кто-то записал — валидатор вернёт false и нужно повторить чтение под реальным read-lock.
+- Быстрее в сценариях с редкими записями, но API не reentrant и требует аккуратности.
+
+---
+
+## Future / CompletableFuture / ExecutorService — управление задачами и результатами
+
+- `ExecutorService` управляет пулом потоков и выполнением `Runnable`/`Callable`.
+- `Future.get()` блокирует, пока задача не завершится.
+- `CompletableFuture` — продвинутый инструмент для асинхронной композиции (thenApply, thenCompose и т.д.).
+
+---
 ---
 
 **Что ещё упомянуть на собеседовании:**  
