@@ -1121,6 +1121,447 @@ class QueueReentrantLock<T> {
     }
 }
 ```
+## Что такое happens-before и как это влияет на volatile и final?
+Что такое happens‑before? Это правило, которое гарантирует: если одна операция happens‑before другой, то все эффекты первой будут видны второй. То есть не просто выполнено раньше, а видно в памяти. В многопоточности каждый поток может жить в своей версии реальности, с кешами, reorder‑оптимизациями и прочими сюрпризами
+Volatile — простая гарантия видимости:
+
+public class VolatileFlag {
+    private volatile boolean flag = false;
+
+    public void writer() {
+        flag = true;
+    }
+
+    public void reader() {
+        if (flag) {
+            System.out.println("Флаг сработал!");
+        }
+    }
+Когда переменная volatile, запись в неё happens‑before любому последующему чтению. То есть гарантируется не только видимость, но и что всё, что было до записи, станет видно второму потоку.
+
+Final — публикация объекта без лишнего
+
+Если правильно публикуем объект (а именно: не даёшь this утечь из конструктора), то финальные поля будут видны корректно:
+
+public class ImmutableThing {
+    private final int value;
+
+    public ImmutableThing(int v) {
+        this.value = v;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+Если объект создаётся, и потом ссылка на него попадает в другой поток — поля final внутри него будут корректны. Но только если конструктор не вызывает start(), не кладёт this в статику и т. д.
+
+Без happens‑before гарантии можно увидеть частично инициализированный объект. Классика: null вместо List, 0 вместо значения, и ночной кошмар дебага.
+
+___________-
+
+## AtomicInteger
+У AtomicInteger такие же гарантии на ordering, visibility и happens-before, как и у volatile, потому что поле value внутри него объявлено как volatile.
+
+Atomicity - чтение и запись в AtomicInteger атомарны. Атомарность достигается засчет механизма CAS. CAS-инструкции позволяют атомарно обновить ячейку памяти или получить ошибку в случае, если состояние ячейки изменилось во время операции. В случае конфликта выполняется повтор операции до ее успешного выполнения.
+
+Mutual exclusion - AtomicInteger не гарантирует взаимного исключения. Несколько процессов могут одновременно читать его значение, но писать может только один.
+
+## В чем преимущество ForkJoinPool над ThreadPoolExecutor?
+ForkJoinPool хорошо работает в случаях, когда задачи могут разделяться на подзадачи. Он использует work-stealing алгоритм, который позволяем потокам "красть" задачи, созданные в других потоках. ThreadPoolExecutor этого делать не может. Если задаче нужно себя разбить, то все её подзадачи будут выполняться в том же потоке последовательно, что может привести к нежелаемой ситуации, когда некоторые потоки работают активно, а другие простаивают без работы.
+
+# 1) **Happens-before** (что это, правила, почему важно)  
+**Коротко:** *happens-before* — это отношение частичного порядка над действиями (чтением/записью/синхронизирующими действиями) в программе, которое задаёт гарантию видимости и порядка: если действие A *happens-before* действие B, то эффекты A гарантированно видимы для B и A не будет наблюдаться как происходящее «после» B при пересборке/оптимизациях/реорганизации выполнения. Это ключевая концепция Java Memory Model (JMM).
+
+**Основные источники happens-before** (правила, создающие ребра hb):  
+- **Program order (порядок в одном потоке)** — все действия в одном потоке упорядочены программно (intra-thread order).  
+- **monitor unlock -> monitor lock** (synchronized): выход из synchronized (unlock) *happens-before* последующему входу в тот же монитор (lock). То есть синхронизированное критическое сечение даёт видимость.  
+- **volatile write -> volatile read**: запись в volatile переменную *happens-before* последующему чтению той же volatile-переменной. Это даёт видимость (барьер).  
+- **Thread start / join**: вызов `t.start()` *happens-before* любому действию в новом потоке; любое действие в потоке *happens-before* возвращению `t.join()`.  
+- **final field rules** (отдельные гарантии для final-полей при корректной инициализации).
+
+**Почему важно**: без наличия hb-ребра JVM/компилятор/CPU могут переупорядочивать операции, и один поток может не увидеть изменения другого — data race / undefined behaviors. Правильное использование `volatile`, `synchronized`, concurrent-утилит и старт/join даёт нужные hb-границы.
+
+**Пример — неправильный код (видимость)**:
+```java
+// Пример ошибок видимости без happens-before
+class FlagExample {
+    static boolean ready = false; // не volatile
+    static int data = 0;
+
+    static class Writer extends Thread {
+        public void run() {
+            data = 42;      // (1)
+            ready = true;   // (2)
+        }
+    }
+
+    static class Reader extends Thread {
+        public void run() {
+            if (ready) {                // (3) может прочитать true/false непредсказуемо
+                System.out.println(data); // может вывести 0, если (1) ещё не виден
+            }
+        }
+    }
+}
+```
+Здесь не гарантируется, что `Reader` увидит `data = 42`, даже если `ready==true` прочитано. Чтобы исправить — сделать `ready` `volatile` или воспользоваться `synchronized`/`Atomic*`/`locks`. `volatile` даёт `write -> read` hb-ребро.
+
+**Исправление (volatile):**
+```java
+static volatile boolean ready = false;
+static int data = 0;
+// Теперь write to ready -> read of ready гарантирует видимость data
+```
+
+**Полезные ремарки для собеседования:**  
+- *Happens-before* — не тот же самый, что «физический порядок» выполнения; это логическое утверждение о видимости и допустимых наблюдаемых значениях.  
+- Если между двумя действиями нет hb-отношения, доступ идёт через *data race* — поведение опосредованно «не гарантировано».
+
+---
+
+# 2) **Как устроен `AtomicInteger`** (внутренности, CAS, VarHandle/Unsafe)  
+
+**Идея:** `AtomicInteger` предоставляет атомарные операции над `int` (increment, add, compareAndSet и пр.) без использования мониторов — через операции низкого уровня **CAS** (Compare-And-Swap) + `volatile` семантику для видимости. Исторически реализация использовала `sun.misc.Unsafe` (native CAS), с Java 9 введены `VarHandle`/`jdk.internal.misc.Unsafe`/intrinsics, но семантика та же: атомарный CAS на памяти.
+
+**Ключевые элементы реализации (упрощённо):**  
+- Поле `volatile int value;` — обеспечивает видимость последних записей потокам.  
+- CAS loop: многие операции (например `incrementAndGet`) реализованы как цикл: читаем текущее значение, пробуем CAS(current, current+1); если CAS не прошёл — повторяем. CAS гарантирует атомарную замену, если никто не поменял значение между чтением и операцией.
+
+**Упрощённая схема (псевдо-реализация):**
+```java
+public class SimpleAtomicInteger {
+    private volatile int value;
+    // Нативный/интринсик CAS:
+    private static native boolean compareAndSwapInt(Object obj, long offset, int expect, int update);
+
+    public final int get() { return value; }
+
+    public final void set(int newValue) { value = newValue; }
+
+    public final int incrementAndGet() {
+        int prev, next;
+        do {
+            prev = value;         // читаем volatile (видим актуальное значение)
+            next = prev + 1;
+            // пытаемся заменить prev -> next атомарно
+        } while (!compareAndSwapInt(this, VALUE_OFFSET, prev, next));
+        return next;
+    }
+}
+```
+Реальная `AtomicInteger` использует `Unsafe`/VarHandle и набор helper-методов (getAndAddInt, compareAndSetInt) для эффективности.
+
+**Поведение и гарантии:**  
+- `compareAndSet` — атомарно сравнивает и, если равно ожидаемому, записывает новое значение. Этот метод в сочетании с `volatile` даёт корректную семантику hb (volatile write -> volatile read).  
+- lock-free/optimistic: при высокой конкуренции CAS может многократно проигрывать, поэтому у некоторых структур есть дополнительные техники (backoff).
+
+**Пример использования `AtomicInteger`:**
+```java
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class Counter {
+    private final AtomicInteger counter = new AtomicInteger(0);
+
+    public void increment() {
+        // lock-free атомарное увеличение
+        int v = counter.incrementAndGet(); // эквивалент CAS-loop внутри
+        // можно использовать compareAndSet для более сложной логики
+    }
+
+    public int get() {
+        return counter.get();
+    }
+}
+```
+
+**Что упомянуть на собеседовании:**  
+- `AtomicInteger` не даёт вам «рентгеновское» последовательное выполнение нескольких операций: если нужно сделать атомарную группу действий — используйте `synchronized`/`Lock` или `AtomicReference` с объектом-агрегатом и CAS.  
+- Начиная с Java 9/10 часть реализации и оптимизаций переехала на `VarHandle`/интринсики JIT.
+
+---
+
+# 3) **Многопоточность на одном ядре (как возможно, что несколько потоков «работают» на одном ядре)**
+
+**Ключевая идея:** физически одноядерный CPU исполняет в каждый момент времени одну машинную инструкцию (в контексте потоков выполнения). «Многопоточность» достигается ОС/аппаратом двумя основными способами:  
+1. **Прерывания/тайм-слисы (time-slicing, preemptive scheduling)** — ОС выделяет каждому потоку квант времени; при переключении — сохраняется контекст и даётся другому потоку; с точки зрения пользователя — потоки выполняются «параллельно».  
+2. **Simultaneous Multithreading (SMT)** / Hyper-Threading — аппаратно одно ядро может иметь несколько логических потоков и выполнять части разных потоков одновременно, разделяя ресурсы (не во всех CPU).
+
+**Как это действует в Java:**  
+- В HotSpot каждая `java.lang.Thread` обычно соотносится с нативным потоком ОС (1:1 model). Планирование потоков — задача ОС (хотя JVM может делать yield/park/unpark). Поэтому даже на одном ядре JVM/OS будут переключать контексты, создавая иллюзию параллелизма.
+
+**Практические следствия / советы:**  
+- На одном ядре конкурентные потоки не ускоряют CPU-bound задачу — они только добавляют накладные расходы на переключения. Но для IO-bound задач несколько потоков часто полезны.  
+- Блокировки/синхронизация — при переключениях контекстов могут происходить блокировки/пробуждения, это влияет на производительность. Для уменьшения переключений используют неблокирующие структуры (atomic/CAS), реактивные/асинхронные подходы или оптимизацию числа потоков под число ядер.
+
+**Небольшой демонстрационный пример (показывает переключение потоков на одном ядре — логика та же и на многих):**
+```java
+public class SingleCoreDemo {
+    public static void main(String[] args) {
+        Runnable busy = () -> {
+            for (int i = 0; i < 5; i++) {
+                System.out.println(Thread.currentThread().getName() + " - tick " + i);
+                // даём шанс планировщику поменять поток
+                Thread.yield(); // подсказка планировщику (не гарантия)
+            }
+        };
+
+        Thread t1 = new Thread(busy, "T1");
+        Thread t2 = new Thread(busy, "T2");
+
+        t1.start(); t2.start();
+    }
+}
+```
+На реальной машине с одним ядром вы увидите интерлинг (перемежаемый вывод), потому что ОС переключает потоки. `Thread.sleep`, `yield`, `park` влияют на то, кто получает квант.
+
+---
+
+# 4) **Все синхронизаторы в пакете `java.util.concurrent` (и `java.util.concurrent.locks`) — зачем, как работает, примеры**  
+
+Я перечислю и коротко разберу **основные** синхронизаторы/утилиты, которые обычно ожидают на собеседовании. Многие из них реализованы поверх **AbstractQueuedSynchronizer (AQS)** — общей основы для реализации семафоров/замков/барьеров (описание AQS ниже).
+
+---
+
+## 4.1 **AbstractQueuedSynchronizer (AQS)** — фундамент
+**Назначение:** каркас для построения синхронизаторов на базе очереди ожидания. Имеет `state` (int) + очередь потоков, поддерживает режимы exclusive/shared. На его основе реализованы `ReentrantLock`, `Semaphore`, `CountDownLatch` и др.
+
+**Как работает (упрощённо):**  
+- В AQS есть атомарное поле `state` и FIFO-очередь ожидающих потоков.  
+- Для эксклюзивных акций (замки) поток пытается захватить `state` (CAS). Если не вышло — встаёт в очередь и блочится (park). При освобождении — непременно оповещаются/разблокируются следующие.  
+- Shared режим (например Semaphore) позволяет нескольким потокам захватывать синхронизатор одновременно (уменьшая `state`).
+
+---
+
+## 4.2 **`Semaphore`**  
+**Зачем:** ограничивает число одновременно выполняемых «допусков» — как счётчик разрешений. Полезно для пулов соединений, ограничений доступа.
+
+**Как работает:** имеет счётчик permits (`state` в AQS). `acquire()` уменьшает счётчик; если стало <0 — поток блокируется; `release()` увеличивает и разблокирует ожидателей. Может быть fair/unfair.
+
+**Пример:**
+```java
+import java.util.concurrent.Semaphore;
+
+public class SemaphoreExample {
+    private final Semaphore sem = new Semaphore(2); // максимум 2 одновременно
+
+    public void useResource() {
+        try {
+            sem.acquire(); // получить разрешение
+            // критическая секция: доступ к ресурсу
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            sem.release(); // вернуть разрешение
+        }
+    }
+}
+```
+
+---
+
+## 4.3 **`CountDownLatch`**  
+**Зачем:** ждать, пока не произойдет N событий. Одноразовый — после исчерпания счётчика нельзя «сбросить». Часто используют для ожидания инициализации или завершения группы задач.
+
+**Как работает:** внутренний счётчик; `await()` блокирует, пока счётчик > 0; `countDown()` уменьшает счётчик; когда достигает 0 — все ожидающие разблокируются. Реализован без прямого использования Lock (внутри — AQS).
+
+**Пример:**
+```java
+import java.util.concurrent.CountDownLatch;
+
+CountDownLatch latch = new CountDownLatch(3);
+
+for (int i = 0; i < 3; i++) {
+    new Thread(() -> {
+        // do work
+        latch.countDown(); // сигнализируем что сделали работу
+    }).start();
+}
+
+latch.await(); // ждём, пока все 3 вызовут countDown()
+```
+
+---
+
+## 4.4 **`CyclicBarrier`**  
+**Зачем:** синхронизирует группу потоков в барьере — все участники ждут друг друга, после чего барьер сбрасывается и может быть использован снова. Отлично для фазированных вычислений.
+
+**Как работает:** каждый поток вызывает `await()` и блокируется; последний пришедший — разблокирует всех; опционально можно передать `Runnable` для запуска при срабатывании барьера. Может быть reuseable.
+
+**Пример:**
+```java
+import java.util.concurrent.CyclicBarrier;
+
+CyclicBarrier barrier = new CyclicBarrier(3, () -> System.out.println("Barrier tripped"));
+
+for (int i = 0; i < 3; i++) {
+    new Thread(() -> {
+        // часть работы
+        barrier.await(); // ждём остальных
+        // следующая фаза
+    }).start();
+}
+```
+
+---
+
+## 4.5 **`Phaser`**  
+**Зачем:** более гибкая версия барьера/счётчика; позволяет динамически регистрировать/дерегистрировать участников, поддерживает фазы. Хорош для многопоточных фазированных вычислений с динамическими участниками.
+
+**Как работает:** похож на `CyclicBarrier` + `CountDownLatch` комбинированно, поддерживает `register()`/`arriveAndAwaitAdvance()`/`arriveAndDeregister()`.
+
+**Пример:**
+```java
+import java.util.concurrent.Phaser;
+
+Phaser phaser = new Phaser(3); // 3 участника
+
+for (int i = 0; i < 3; i++) {
+    new Thread(() -> {
+        // фаза 1 ...
+        phaser.arriveAndAwaitAdvance(); // ждём всех
+        // фаза 2 ...
+    }).start();
+}
+```
+
+---
+
+## 4.6 **`Exchanger<V>`**  
+**Зачем:** позволяет паре потоков обменяться объектами; полезно, когда два потока должны синхронно обменяться данными.
+
+**Как работает:** `exchange(v)` блокируется, ожидая партнёра; когда есть второй `exchange(u)`, объекты меняются и оба разблокируются.
+
+**Пример:**
+```java
+Exchanger<String> ex = new Exchanger<>();
+
+// Thread A
+String fromA = "dataA";
+String fromB = ex.exchange(fromA); // waits for partner
+
+// Thread B
+String fromB = "dataB";
+String fromA = ex.exchange(fromB); // оба обменяются объектами
+```
+
+---
+
+## 4.7 **`SynchronousQueue`**  
+**Зачем:** блокирующая очередь без внутренней емкости — каждый `put` ожидает `take`. Используется при handoff между producer/consumer, например в `ThreadPoolExecutor` с `new SynchronousQueue()`.
+
+**Как работает:** нет буфера — т.е. передача данных напрямую между producer и consumer. Может быть fair/unfair.
+
+**Пример:**
+```java
+SynchronousQueue<String> q = new SynchronousQueue<>();
+new Thread(() -> {
+    q.put("msg"); // ждёт пока кто-то возьмёт
+}).start();
+
+new Thread(() -> {
+    String s = q.take(); // ждёт пока кто-то положит
+}).start();
+```
+
+---
+
+## 4.8 **Locks и Conditions (`java.util.concurrent.locks`)**  
+- **`ReentrantLock`** — альтернатива `synchronized` с дополнительными возможностями (fair mode, tryLock, lockInterruptibly, Conditions). Реализован через AQS.  
+- **`ReentrantReadWriteLock`** — позволяет множественные считывающие (read) замки и эксклюзивный write-замок. Хорош для структур, где много чтений и редких записей.  
+- **`StampedLock`** (Java 8) — высокопроизводительный lock с поддержкой оптимистического чтения (optimistic read stamp), улучшающий throughput в read-heavy сценариях; но API не reentrant и требует внимательного использования.
+
+**Примеры:**
+```java
+// ReentrantLock
+ReentrantLock lock = new ReentrantLock();
+lock.lock();
+try {
+    // критическая секция
+} finally {
+    lock.unlock();
+}
+
+// ReadWrite
+ReentrantReadWriteLock rw = new ReentrantReadWriteLock();
+rw.readLock().lock();
+try {
+   // много чтений
+} finally {
+   rw.readLock().unlock();
+}
+
+// StampedLock optimistic read
+StampedLock sl = new StampedLock();
+long stamp = sl.tryOptimisticRead();
+try {
+    // читаем поля
+    if (!sl.validate(stamp)) {
+        stamp = sl.readLock();
+        try {
+           // повторное чтение под реальным read-lock
+        } finally { sl.unlockRead(stamp); }
+    }
+} finally { /* если понадобилось */ }
+```
+
+---
+
+## 4.9 **`Future`, `CompletableFuture`, `ExecutorService`**  
+Это скорее абстракции/механизмы управления задачами и результатами, чем синхронизаторы в классическом смысле, но часто используются для синхронизации результата (get(), join()). `CompletableFuture` даёт реактивное композиционное API.
+
+---
+
+**Что ещё упомянуть на собеседовании:**  
+- Большинство синхронизаторов построены на AQS; полезно знать про `exclusive` vs `shared` режимы, и что AQS использует FIFO очередь потоков и `park/unpark`.  
+- Выбор между `synchronized` и `Lock` зависит от требований (fairness, tryLock, condition variables и пр.). `synchronized` проще и в большинстве случаев достаточен.
+
+---
+
+# 5) **Heap и Stack в многопоточности (как устроены, что общего/отличается, тонкости)**
+
+**Основная модель JVM:**  
+- **Heap (куча)** — общая область памяти, разделяемая всеми потоками; объекты и их поля размещаются в куче. Синхронизация нужна при доступе к общим объектам, чтобы обеспечить корректность и видимость между потоками. GC работает с кучей, освобождая неиспользуемые объекты.  
+- **Stack (стек потока / Java stack)** — у каждого потока своя стек-рамка (stack frame) для вызовов методов, локальных переменных (primitives и ссылки), operand stack и др. Локальные переменные, которые не доступны другим потокам и не «убегают» в heap, безопасны без синхронизации.
+
+**Следствия:**  
+- Если вы создаёте локальную переменную внутри метода, и не публикуете объект (не сохраняете ссылку в поле, не передаёте в другой поток), то этот объект не требует синхронизации. JVM может произвести **escape analysis** и вообще выделить объект на стеке (stack allocation) или оптимизировать away. Это важный оптимизационный момент, который уменьшает накладные расходы.  
+- Поля объектов в куче доступны всем потокам; без hb-границ вы не получите гарантию видимости (см. `volatile` / `synchronized`).
+
+**ThreadLocal** — удобный механизм, когда каждому потоку нужна своя копия данных; данные хранятся в структуре, ассоциированной с потоком, поэтому нет гонок между потоками для этих данных.
+
+**Lock-оптимизации и объектные заголовки:**  
+- JVM применяет разные оптимизации локов: *biased locking* (смещение в заголовке), *thin lock*, *inflated lock* — это влияет на микропроизводительность `synchronized`. При конкурентном доступе lock «inflate» и переключается в более тяжёлую структуру. Полезно знать на интервью про эти термины в общих чертах.
+
+**Пример-сравнение (локальное vs на куче):**
+```java
+class Example {
+    // shared
+    private int sharedCounter; // в куче
+
+    public void threadUnsafe() {
+        int local = 0; // локальная (stack)
+        local++; // не нужно синхронизировать
+    }
+
+    public void incShared() {
+        sharedCounter++; // нужно синхронизировать (или volatile/atomic), т.к. поле в куче
+    }
+}
+```
+
+**Что важно на собеседовании:**  
+- Объясните, что *heap — shared*, *stack — per-thread*; приведите пример, где отсутствие синхронизации приводит к неправильным результатам (см. пункт 1). Упомяните `ThreadLocal` и `escape analysis`.
+
+---
+
+# Заключение — краткие шпаргалки для собеседования
+- **Happens-before** = частичный порядок видимости/порядка (program order, volatile write→read, monitor unlock→lock, thread start/join, final field rules).  
+- **AtomicInteger** = `volatile int` + CAS (Unsafe/VarHandle) + CAS-loop для атомарных операций. Не заменяет групповую атомарность нескольких операций.  
+- **Многопоточность на одном ядре** = time-slicing/OS scheduler (и/или SMT аппаратно), влияет на throughput vs latency; CPU-bound задачи не становятся быстрее на одном ядре при добавлении потоков.  
+- **Синхронизаторы** = CountDownLatch, CyclicBarrier, Phaser, Semaphore, Exchanger, SynchronousQueue, ReentrantLock/ReentrantReadWriteLock/StampedLock (и `CompletableFuture`/Executors) — основные; большинство строится на AQS.  
+- **Heap vs Stack** = heap — общий (объекты), stack — per-thread (локалы); используйте `ThreadLocal`, `volatile`, `synchronized`/locks правильно; помните о escape-analysis и оптимизациях JVM.
+
 
 [к оглавлению](#Многопоточность)
 
