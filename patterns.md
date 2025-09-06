@@ -620,12 +620,586 @@ class Document implements Cloneable {
 
 ---
 
-Если хочешь, могу:
-- Написать JUnit-тесты для каждого примера.
-- Переписать примеры под Spring/DI (например, показать как Singleton-паттерн реализуется через Spring Bean scope).
-- Сделать одно обобщённое PDF-шпаргалку для собеседования (готовый файл, который можно распечатать).
+# Структурные паттерны проектирования (с подробным объяснением и примерами на Java + Lombok)
 
-Напиши, что из этого нужно — и я сделаю прямо здесь.
+Структурные паттерны помогают **организовать классы и объекты в более крупные структуры**, сохраняя при этом гибкость.  
+Они фокусируются на том, **как связать классы и объекты между собой**.
+
+---
+
+# 1. Adapter (Адаптер)
+### Идея (простыми словами)
+Адаптер работает как **переходник между несовместимыми интерфейсами**. Если у нас есть существующий класс с одним интерфейсом, а клиент ожидает другой, адаптер "переводит" вызовы.
+
+### Когда использовать
+- Есть готовый класс, но его интерфейс не подходит клиентскому коду.
+- Не хочется или нельзя менять существующий класс.
+- Нужно использовать стороннюю библиотеку с неудобным интерфейсом.
+
+### Плюсы / минусы
++ Позволяет переиспользовать существующие классы без изменения их кода.  
++ Изолирует изменения интерфейсов.  
+− Может привести к избыточному числу классов (каждый адаптер отдельно).  
+− Иногда ухудшает читаемость из-за "лишнего уровня".
+
+### Пример: `SquarePeg` и `RoundHole`
+```java
+// AdapterDemo.java
+// Пример: у нас есть КруглоеОтверстие (RoundHole) и КруглыйКолышек (RoundPeg).
+// Но появляется КвадратныйКолышек (SquarePeg), который не подходит.
+// Используем адаптер, чтобы заставить квадратный колышек работать с круглым отверстием.
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+
+public class AdapterDemo {
+    public static void main(String[] args) {
+        RoundHole hole = new RoundHole(5);
+        RoundPeg roundPeg = new RoundPeg(5);
+        System.out.println("Круглый колышек помещается? " + hole.fits(roundPeg));
+
+        SquarePeg smallSqPeg = new SquarePeg(5);
+        SquarePeg largeSqPeg = new SquarePeg(10);
+
+        // Адаптируем квадратные колышки
+        RoundPeg smallAdapter = new SquarePegAdapter(smallSqPeg);
+        RoundPeg largeAdapter = new SquarePegAdapter(largeSqPeg);
+
+        System.out.println("Маленький квадратный колышек помещается? " + hole.fits(smallAdapter));
+        System.out.println("Большой квадратный колышек помещается? " + hole.fits(largeAdapter));
+    }
+}
+
+@Getter
+@AllArgsConstructor
+class RoundHole {
+    private double radius;
+
+    public boolean fits(RoundPeg peg) {
+        return this.radius >= peg.getRadius();
+    }
+}
+
+@Getter
+@AllArgsConstructor
+class RoundPeg {
+    private double radius;
+}
+
+@Getter
+@AllArgsConstructor
+class SquarePeg {
+    private double width;
+}
+
+// Адаптер: заставляет SquarePeg работать как RoundPeg
+@AllArgsConstructor
+class SquarePegAdapter extends RoundPeg {
+    private SquarePeg peg;
+
+    public double getRadius() {
+        // Диагональ квадрата / 2 = радиус вписанной окружности
+        return (peg.getWidth() * Math.sqrt(2)) / 2;
+    }
+}
+```
+
+---
+
+# 2. Composite (Компоновщик)
+### Идея
+Позволяет работать с **отдельными объектами и их составами одинаково**.  
+Используется для представления древовидных структур (например, файловая система).
+
+### Когда использовать
+- Когда объекты образуют иерархию "часть-целое".
+- Когда нужно, чтобы клиент одинаково работал как с одиночными объектами, так и с их комбинациями.
+
+### Плюсы / минусы
++ Унифицированный способ работы с отдельными объектами и группами.  
++ Легко строить сложные иерархии.  
+− Может быть сложно ограничить доступные операции для "листьев" и "композитов".  
+− Может быть трудно контролировать структуру (например, запретить пустые папки).
+
+### Пример: файловая система (Файл и Папка)
+```java
+// CompositeDemo.java
+// Демонстрация: Папка содержит как файлы, так и другие папки.
+// Оба реализуют общий интерфейс FileSystemComponent.
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.ToString;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class CompositeDemo {
+    public static void main(String[] args) {
+        File file1 = new File("file1.txt");
+        File file2 = new File("file2.txt");
+        Directory dir = new Directory("docs");
+        dir.add(file1);
+        dir.add(file2);
+
+        Directory root = new Directory("root");
+        root.add(dir);
+        root.add(new File("readme.md"));
+
+        root.show();
+    }
+}
+
+interface FileSystemComponent {
+    void show();
+}
+
+@Getter
+@AllArgsConstructor
+@ToString
+class File implements FileSystemComponent {
+    private String name;
+
+    @Override
+    public void show() {
+        System.out.println("Файл: " + name);
+    }
+}
+
+@Getter
+@AllArgsConstructor
+class Directory implements FileSystemComponent {
+    private String name;
+    private List<FileSystemComponent> children = new ArrayList<>();
+
+    public Directory(String name) {
+        this.name = name;
+    }
+
+    public void add(FileSystemComponent component) {
+        children.add(component);
+    }
+
+    @Override
+    public void show() {
+        System.out.println("Папка: " + name);
+        for (FileSystemComponent child : children) {
+            child.show();
+        }
+    }
+}
+```
+
+---
+
+# 3. Proxy (Заместитель)
+### Идея
+Proxy выступает как "заместитель" объекта, контролируя доступ к нему.  
+Он может добавлять к основному объекту **ленивую инициализацию, безопасность, кэширование, логирование**.
+
+### Когда использовать
+- Ленивое создание "тяжёлого" объекта (виртуальный прокси).
+- Добавление доступа/логирования без изменения реального объекта.
+- Удалённые прокси (работа через сеть).
+
+### Плюсы / минусы
++ Позволяет контролировать доступ и добавлять функциональность.  
++ Поддержка ленивой загрузки.  
+− Усложняет код (ещё один уровень абстракции).  
+− Может быть лишним, если дополнительных функций нет.
+
+### Пример: ленивое создание "тяжёлого" объекта
+```java
+// ProxyDemo.java
+// Пример: загружаем "тяжёлое" изображение только тогда, когда оно реально нужно.
+
+public class ProxyDemo {
+    public static void main(String[] args) {
+        Image image = new ProxyImage("photo.jpg");
+
+        // Файл ещё не загружен
+        image.display();
+
+        // Повторный вызов: файл уже загружен
+        image.display();
+    }
+}
+
+interface Image {
+    void display();
+}
+
+// Реальный объект
+class RealImage implements Image {
+    private String filename;
+
+    public RealImage(String filename) {
+        this.filename = filename;
+        loadFromDisk();
+    }
+
+    private void loadFromDisk() {
+        System.out.println("Загрузка изображения: " + filename);
+    }
+
+    @Override
+    public void display() {
+        System.out.println("Отображение: " + filename);
+    }
+}
+
+// Прокси: откладывает создание RealImage
+class ProxyImage implements Image {
+    private String filename;
+    private RealImage realImage;
+
+    public ProxyImage(String filename) {
+        this.filename = filename;
+    }
+
+    @Override
+    public void display() {
+        if (realImage == null) {
+            realImage = new RealImage(filename);
+        }
+        realImage.display();
+    }
+}
+```
+
+---
+
+# 4. Flyweight (Легковес)
+### Идея
+Разделяем общее состояние объектов (intrinsic state), а уникальное (extrinsic state) передаём извне.  
+Это сильно экономит память, если объектов очень много.
+
+### Когда использовать
+- Нужно создать огромное количество похожих объектов (например, символы текста, частицы в игре).
+- Внутреннее состояние объектов одинаковое, а уникальное можно вынести наружу.
+
+### Плюсы / минусы
++ Сильно экономит память.  
++ Ускоряет создание новых объектов (берём из кэша).  
+− Усложняет код (нужно разделять состояние).  
+− Сложно поддерживать, если много разных вариантов состояний.
+
+### Пример: символы в тексте
+```java
+// FlyweightDemo.java
+// Демонстрация: у нас есть много "символов".
+// Общая часть (глиф) хранится в Flyweight, а позиция — внешний контекст.
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class FlyweightDemo {
+    public static void main(String[] args) {
+        GlyphFactory factory = new GlyphFactory();
+
+        Glyph g1 = factory.getGlyph('a');
+        Glyph g2 = factory.getGlyph('a');
+        Glyph g3 = factory.getGlyph('b');
+
+        g1.draw(1, 1);
+        g2.draw(2, 2);
+        g3.draw(3, 3);
+    }
+}
+
+interface Glyph {
+    void draw(int x, int y);
+}
+
+// Конкретный легковес
+class CharacterGlyph implements Glyph {
+    private final char symbol;
+
+    public CharacterGlyph(char symbol) {
+        this.symbol = symbol;
+    }
+
+    @Override
+    public void draw(int x, int y) {
+        System.out.println("Рисуем '" + symbol + "' в позиции (" + x + "," + y + ")");
+    }
+}
+
+// Фабрика легковесов
+class GlyphFactory {
+    private final Map<Character, Glyph> cache = new HashMap<>();
+
+    public Glyph getGlyph(char c) {
+        return cache.computeIfAbsent(c, CharacterGlyph::new);
+    }
+}
+```
+
+---
+
+# 5. Facade (Фасад)
+### Идея
+Фасад предоставляет **простой интерфейс к сложной системе**.  
+Клиенту не нужно знать детали — он использует удобный "фасад".
+
+### Когда использовать
+- Сложная система, много классов и зависимостей.
+- Хотите упростить работу клиента и скрыть детали.
+
+### Плюсы / минусы
++ Упрощает интерфейс системы.  
++ Скрывает детали реализации.  
+− Может превратиться в "God object", если в него тянуть слишком много функций.  
+− Иногда скрывает слишком много и ограничивает гибкость.
+
+### Пример: Домашний кинотеатр
+```java
+// FacadeDemo.java
+// Демонстрация: клиент включает кинотеатр одной командой, а не кучей.
+
+public class FacadeDemo {
+    public static void main(String[] args) {
+        HomeTheaterFacade theater = new HomeTheaterFacade(
+                new Amplifier(),
+                new Projector(),
+                new Screen()
+        );
+
+        theater.watchMovie("Inception");
+        theater.endMovie();
+    }
+}
+
+// Подсистемы
+class Amplifier {
+    public void on() { System.out.println("Усилитель включен"); }
+    public void off() { System.out.println("Усилитель выключен"); }
+}
+
+class Projector {
+    public void on() { System.out.println("Проектор включен"); }
+    public void off() { System.out.println("Проектор выключен"); }
+}
+
+class Screen {
+    public void down() { System.out.println("Экран опущен"); }
+    public void up() { System.out.println("Экран поднят"); }
+}
+
+// Фасад
+class HomeTheaterFacade {
+    private Amplifier amp;
+    private Projector projector;
+    private Screen screen;
+
+    public HomeTheaterFacade(Amplifier amp, Projector projector, Screen screen) {
+        this.amp = amp;
+        this.projector = projector;
+        this.screen = screen;
+    }
+
+    public void watchMovie(String movie) {
+        System.out.println("Готовим кинотеатр к просмотру...");
+        screen.down();
+        amp.on();
+        projector.on();
+        System.out.println("Запускаем фильм: " + movie);
+    }
+
+    public void endMovie() {
+        System.out.println("Выключаем кинотеатр...");
+        screen.up();
+        projector.off();
+        amp.off();
+    }
+}
+```
+
+---
+
+# 6. Bridge (Мост)
+### Идея
+Разделяет абстракцию и реализацию, позволяя изменять их независимо.  
+Клиент работает с абстракцией, а реализация передаётся в неё как зависимость.
+
+### Когда использовать
+- Нужно разделить уровни (например, разные виды форм + разные способы отрисовки).
+- Когда абстракция и реализация должны изменяться независимо.
+
+### Плюсы / минусы
++ Абстракция и реализация независимы.  
++ Легко добавлять новые реализации и новые абстракции.  
+− Усложняет структуру кода (дополнительный слой).  
+− Может быть избыточен для маленьких систем.
+
+### Пример: фигуры и способы их рисования
+```java
+// BridgeDemo.java
+// Демонстрация: фигура (Shape) использует интерфейс Renderer для рисования.
+// Можно легко добавлять новые фигуры или новые способы рендера.
+
+public class BridgeDemo {
+    public static void main(String[] args) {
+        Renderer vector = new VectorRenderer();
+        Renderer raster = new RasterRenderer();
+
+        Shape circle1 = new Circle(vector);
+        Shape circle2 = new Circle(raster);
+
+        circle1.draw();
+        circle2.draw();
+    }
+}
+
+interface Renderer {
+    void renderCircle(float radius);
+}
+
+class VectorRenderer implements Renderer {
+    public void renderCircle(float radius) {
+        System.out.println("Рисуем круг в векторном виде с радиусом " + radius);
+    }
+}
+
+class RasterRenderer implements Renderer {
+    public void renderCircle(float radius) {
+        System.out.println("Рисуем пиксельный круг с радиусом " + radius);
+    }
+}
+
+// Абстракция
+abstract class Shape {
+    protected Renderer renderer;
+
+    public Shape(Renderer renderer) {
+        this.renderer = renderer;
+    }
+
+    public abstract void draw();
+}
+
+class Circle extends Shape {
+    private float radius = 5;
+
+    public Circle(Renderer renderer) {
+        super(renderer);
+    }
+
+    @Override
+    public void draw() {
+        renderer.renderCircle(radius);
+    }
+}
+```
+
+---
+
+# 7. Decorator (Декоратор)
+### Идея
+Позволяет **динамически добавлять функциональность объекту**, оборачивая его в другие объекты-декораторы.  
+В отличие от наследования, можно гибко комбинировать несколько декораторов.
+
+### Когда использовать
+- Нужно добавлять новые обязанности объектам на лету.
+- Не хочется создавать кучу подклассов.
+
+### Плюсы / минусы
++ Позволяет гибко добавлять функциональность без изменения исходного кода.  
++ Можно комбинировать несколько декораторов.  
+− Много мелких классов, которые могут усложнить понимание.  
+− Не всегда очевидно, в каком порядке применяются декораторы.
+
+### Пример: добавление функциональности кофе
+```java
+// DecoratorDemo.java
+// Демонстрация: есть базовый кофе, и мы можем добавлять "ингредиенты" (молоко, сахар).
+// Каждый декоратор оборачивает исходный объект.
+
+public class DecoratorDemo {
+    public static void main(String[] args) {
+        Coffee coffee = new SimpleCoffee();
+        System.out.println(coffee.getDescription() + " = " + coffee.getCost());
+
+        coffee = new MilkDecorator(coffee);
+        System.out.println(coffee.getDescription() + " = " + coffee.getCost());
+
+        coffee = new SugarDecorator(coffee);
+        System.out.println(coffee.getDescription() + " = " + coffee.getCost());
+    }
+}
+
+interface Coffee {
+    String getDescription();
+    double getCost();
+}
+
+// Базовый класс
+class SimpleCoffee implements Coffee {
+    @Override
+    public String getDescription() {
+        return "Обычный кофе";
+    }
+
+    @Override
+    public double getCost() {
+        return 2.0;
+    }
+}
+
+// Декоратор
+abstract class CoffeeDecorator implements Coffee {
+    protected Coffee decoratedCoffee;
+
+    public CoffeeDecorator(Coffee coffee) {
+        this.decoratedCoffee = coffee;
+    }
+}
+
+// Конкретные декораторы
+class MilkDecorator extends CoffeeDecorator {
+    public MilkDecorator(Coffee coffee) {
+        super(coffee);
+    }
+
+    @Override
+    public String getDescription() {
+        return decoratedCoffee.getDescription() + ", молоко";
+    }
+
+    @Override
+    public double getCost() {
+        return decoratedCoffee.getCost() + 0.5;
+    }
+}
+
+class SugarDecorator extends CoffeeDecorator {
+    public SugarDecorator(Coffee coffee) {
+        super(coffee);
+    }
+
+    @Override
+    public String getDescription() {
+        return decoratedCoffee.getDescription() + ", сахар";
+    }
+
+    @Override
+    public double getCost() {
+        return decoratedCoffee.getCost() + 0.2;
+    }
+}
+```
+
+---
+
+# Заключение
+- **Adapter** — подключаем несовместимые интерфейсы.  
+- **Composite** — дерево объектов (часть-целое).  
+- **Proxy** — контролируем доступ к объекту.  
+- **Flyweight** — экономим память, разделяя общее состояние.  
+- **Facade** — упрощаем доступ к сложной системе.  
+- **Bridge** — разделяем абстракцию и реализацию.  
+- **Decorator** — добавляем функциональность объекту динамически.
+
 
 
 [Вопросы для собеседования](README.md)
