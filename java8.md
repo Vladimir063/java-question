@@ -919,10 +919,279 @@ new String(Base64.getDecoder().decode("aW5wdXQ=="), "utf-8"); //input
 
 [к оглавлению](#java-8)
 
-# Источники
-+ [Хабрахабр - Новое в Java 8](https://habrahabr.ru/post/216431/)
-+ [Хабрахабр - Шпаргалка Java программиста 4. Java Stream API](https://habrahabr.ru/company/luxoft/blog/270383/)
-+ [METANIT.COM](http://metanit.com/java/tutorial/9.1.php)
-+ [javadevblog.com](http://javadevblog.com/interfejsy-v-java-8-staticheskie-metody-metody-po-umolchaniyu-funktsional-ny-e-interfejsy.html)
+Отлично — сделаю развёрнутый разбор **основных** (т.е. тех, что реально меняют код, архитектуру и жизнь на собесах) отличий **Java 21 (LTS)** от **Java 11 (LTS)**. Будет много текста — но именно это ты просил: объяснения, подводные камни, интервью-подвохи и **практические примеры с подробными комментариями почти по строкам (на русском)**. Я специально фокусируюсь на тех фичах, которые чаще всего обсуждают на собеседованиях для Senior Java-разработчика и которые реально влияют на миграцию и дизайн приложений.
+
+Ниже — большие тематические блоки. После каждого блока — ссылки на официальные JEP/доки (чтобы ты мог быстро ссылаться на первоисточники при подготовке к собесу).
+
+# Короткая ориентация (LTS + контекст)
+- Java 11 — LTS-релиз (релиз 2018), в нём уже есть важные вещи: модульная система (JPMS, из JDK9), новый HTTP-клиент стал стандартом, ряд API-улучшений. Подробнее — релизные заметки JDK 11. citeturn0search1  
+- Java 21 — LTS (релиз 2023). Набор JEP’ов с 17→21 делает эту версию качественно иной: финализированы (прошли preview) **виртуальные потоки**, добавлены **record/record-patterns**, **pattern matching for switch**, **generational ZGC**, **Sequenced Collections**, **FFM API (preview)**, **Structured Concurrency (preview)** и ряд других. Список JEP’ов JDK21. citeturn1view0turn4search11
+
+(далее — подробно по важнейшим темам — читая эти блоки, думай с точки зрения интервью: *“что спрашивают и где ловят на глупости”* — я выделю типичные ловушки).
+
+---
+
+# 1) Язык: records, sealed, pattern matching (big change vs 11)
+**Суть:** с Java 11 вам приходилось писать простые DTO/Value-классы вручную (конструктор, equals/hashCode, toString). В современных версиях появились «Record» (immutable data carrier), «Sealed types» (контролируемое наследование) и мощное **pattern matching** (для instanceof и switch) + record patterns — это даёт выразительную, безопасную и менее многословную обработку данных.
+
+**Почему это важно для Senior:**
+- Умение правильно применять record vs класс (immutable semantics, сериализация, JPA/Jackson-совместимость) — частый кейс.
+- Sealed types дают строгую исчерпывающую обработку в switch/pattern matching — часто на интервью просят объяснить, как гарантировать exhaustiveness.
+- Небольшие подводные камни: record — final по умолчанию (нельзя наследовать), record компоненты — это часть state, default equals/hashCode основаны на компонентах; record + JPA плохо сочетаются без адаптаций; pattern matching / switch умеет сопоставлять null/guards по-особому — это часто спрашивают.
+
+Официальные JEPы: Records (JEP 395), Sealed Classes (JEP 409), Record Patterns (JEP 440), Pattern Matching for switch (JEP 441). citeturn4search0turn4search1turn4search3turn4search2
+
+### Пример: `record` + `sealed` + pattern matching в `switch`
+```java
+// Person.java (Java 21)
+// --- Пример одного файла, показываем record + sealed hierarchy + switch pattern matching ---
+// Все комментарии на русском: почти для каждой строки объяснение.
+
+package com.example;
+
+// record — компактная конструкция для "data carrier" (immutable по умолчанию)
+public record Person(String name, int age) { // 1) объявляем record с двумя компонентами
+    // 2) Компилятор автоматически генерирует:
+    //    - приватные финальные поля (name, age)
+    //    - публичные accessor-методы name(), age()
+    //    - canonical constructor (Person(String name,int age))
+    //    - equals/hashCode/toString
+    // 3) Можно объявить compact constructor, в котором валидации:
+    public Person { 
+        if (name == null || name.isBlank()) // 3.1) валидация входных данных
+            throw new IllegalArgumentException("name required");
+        if (age < 0) 
+            throw new IllegalArgumentException("age must be >= 0");
+    }
+}
+
+// sealed hierarchy — контролируем, кто может наследовать интерфейс/класс
+sealed interface Shape permits Circle, Rectangle {} // 1) только Circle и Rectangle могут быть подтипами
+
+// final record — простая immutable реализация подтипа
+public final record Circle(double radius) implements Shape {} // 2) record здесь final — нельзя наследовать дальше
+
+public final record Rectangle(double w, double h) implements Shape {} // 3) ещё один подтип
+
+// Пример использования pattern matching for switch (Java 21)
+public class PatternDemo {
+    public static String describeShape(Shape s) {
+        // switch с шаблонами (pattern matching)
+        return switch (s) {
+            case Circle c -> "Circle with r=" + c.radius(); // 1) автоматически привязывается c
+            case Rectangle r && (r.w() == r.h()) -> "Square w=" + r.w(); // 2) guard в паттерне: && (условие)
+            case Rectangle r -> "Rectangle " + r.w() + "x" + r.h(); // 3) обычный case
+            // если Shape sealed и мы покрыли все разрешенные подтипы, компилятор проверит exhaustiveness
+        };
+    }
+}
+```
+**Подводные камни / интервью-ловушки:**
+- `record` и mutable frameworks: JPA обожает setters и прокси — record не вписывается в JPA без специальных шагов (инобыт/constructor-based mapping). Интервьюер может спросить — как сериализовать/десериализовать record в Jackson (надо настроить модуль или использовать конструкцию с @JsonCreator).
+- `sealed` + `switch` — если hierarchy изменится (появится новый permitted subtype), неочевидно где компилятор перестанет считать switch исчерпывающим — это важно в код-ревью.
+citeturn4search0turn4search1turn4search2
+
+---
+
+# 2) Конкурентность: Virtual Threads (Loom) + Structured Concurrency
+**Суть:** Java 21 **финализировала виртуальные потоки (Project Loom)** — они теперь полноценный инструмент (раньше были preview с JDK19/20). Это даёт возможность создавать почти миллион «легких» потоков, писать код в блокирующем стиле (простые `synchronized` / blocking IO) и при этом иметь масштабируемость реактивных систем. Плюс — **Structured Concurrency** (preview) вводит `StructuredTaskScope` для безопасной оркестрации параллельных задач (управляемый lifecycle).
+
+Официально: JEP 444 — Virtual Threads; JEP 453 — Structured Concurrency (preview). citeturn3search0turn6search4
+
+**Почему это важно на собесе:**
+- Часто спрашивают: «Когда использовать виртуальные потоки, а когда — платформенные?», «Как это взаимодействует с ThreadLocal?», «Как перевести blocking-IO приложение на виртуальные потоки?»
+- Ловушки: библиотеки, ожидающие платформенные потоки (некоторые low-level native hooks), или плохо написанные ThreadLocal (в Java 21 thread-local гарантированы для виртуальных потоков, но концептуально scoped values — более лёгкая заменяющая конструкция).
+- С виртуальными потоками нужно подумать о пуле: не используем обычные cached thread pools без перепроверки; есть удобный API: `Thread.ofVirtual().start(...)`, `Executors.newVirtualThreadPerTaskExecutor()`.
+
+### Пример: простой сервер задач с виртуальными потоками
+```java
+// VirtualThreadsDemo.java
+import java.util.concurrent.*;
+
+// Демонстрирует создание виртуального потока и исполнение задач
+public class VirtualThreadsDemo {
+    public static void main(String[] args) throws Exception {
+        // Создаем Executor, где для каждой задачи будет создаваться виртуальный поток
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) { // 1) автозакрывается (implements AutoCloseable)
+            // Отправим 3 задачки
+            for (int i = 0; i < 3; i++) {
+                final int id = i;
+                executor.submit(() -> { // 2) задача запускается в виртуальном потоке
+                    System.out.println("Task " + id + " started on " + Thread.currentThread());
+                    try {
+                        Thread.sleep(200); // 3) блокирующий вызов — НЕ блокирует ОС-поток в Loom, только виртуальный поток
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    System.out.println("Task " + id + " finished");
+                });
+            }
+            // Ждём немного, пока tasks выполнятся
+            Thread.sleep(500);
+        }
+        // executor закрыт => виртуальные потоки завершены/отменены корректно
+    }
+}
+```
+**Комментарии/ловушки:**
+- `Thread.sleep` в виртуальном потоке «не тянет» за собой создание ОС-потока; blocking IO будет эффективно «переключать» carrier threads. Но если нативный блокирующий вызов не умеет отпускать carrier thread — возможны проблемы.
+- Для отладки и мониторинга: toolchain (например, Flight Recorder, профайлеры) нужно проверить на предмет поддержки виртуальных потоков. citeturn3search2turn3search13
+
+### Пример: Structured Concurrency (Simple)
+```java
+// StructuredConcurrencyDemo.java
+import java.util.concurrent.*;
+
+// Пример использования StructuredTaskScope (preview API)
+public class StructuredConcurrencyDemo {
+    public static void main(String[] args) throws Exception {
+        // Используем выключаемый при выходе try-with-resources scope
+        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) { // 1) политика: если один упал — отменить остальные
+            var a = scope.fork(() -> fetch("left"));  // 2) fork создает подзадачу (обычно виртуальный поток)
+            var b = scope.fork(() -> fetch("right")); // 3) ещё одна подзадача
+            scope.join();                              // 4) ждём завершения всех/пока не сработает политика
+            scope.throwIfFailed();                     // 5) если была ошибка — бросим её наружу
+            // получаем результаты (все успешны)
+            System.out.println("Results: " + a.resultNow() + ", " + b.resultNow());
+        }
+    }
+
+    static String fetch(String name) throws Exception {
+        Thread.sleep(200); // симуляция IO
+        return "ok-" + name;
+    }
+}
+```
+**Интервью-вопросы:** чем structured concurrency лучше простого `ExecutorService.invokeAll()`? (ответ: более явный lifecycle/отмена/исключения, меньше утечек потоков, try-with-resources гарантирует shutdown). citeturn6search1turn6search4
+
+---
+
+# 3) Foreign Function & Memory API (FFM) — альтернатива JNI (preview)
+**Суть:** JDK21 привёл третью preview-версию FFM API (проект Panama) — безопасный API для вызова native библиотек и работы с off-heap памятью без JNI boilerplate. Это важная тема для senior: когда нужно высокопроизводительное взаимодействие с C/C++.
+
+**Почему это важно:**
+- JNI — сложен и опасен. FFM упрощает и делает типобезопаснее доступ к native-ресурсам.
+- Но FFM в Java 21 — preview: требует `--enable-preview` и ещё API может меняться → осторожность при использовании в проде.
+- Ловушка: lifetime/nativesafety — нужно корректно управлять ареями/сегментами памяти (Arena), иначе утечки/UB.
+
+Официальные материалы: JEP 442 и документация с примерами (включая пример `strlen`). citeturn5search0turn5search15
+
+### Мини-пример (взято и сокращено по документам): вызвать `strlen` из libc
+```java
+// FfmDemo.java (упрощено — для иллюстрации)
+// Примечание: чтобы компилировать/запускать потребуется --enable-preview и модульные флаги (см. JDK21 docs)
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodType;
+import java.nio.charset.StandardCharsets;
+import jdk.incubator.foreign.*; // preview API пакет (в JDK21 это preview)
+import static jdk.incubator.foreign.CLinker.*;
+
+public class FfmDemo {
+    public static long strlen(String s) throws Throwable {
+        // Создаем "Arena" — область для хранения native-объектов (управляет lifetime)
+        try (var arena = Arena.ofConfined()) { // 1) выделяем конфайнед арену — автоматически освобождается
+            MemorySegment cStr = arena.allocateUtf8String(s); // 2) копируем Java string в нативную память с UTF-8
+            SymbolLookup libc = CLinker.systemLookup();       // 3) получаем lookup для libc
+            MethodHandle mh = CLinker.systemCLinker()
+                .downcallHandle(libc.lookup("strlen").get(),
+                                MethodType.methodType(long.class, MemoryAddress.class),
+                                FunctionDescriptor.of(jlong(), addressType())); // 4) создаём method handle
+            long len = (long) mh.invoke(cStr.address()); // 5) вызов native-функции
+            return len;
+        } // 6) аренa закрывается => native-память освобождена
+    }
+}
+```
+**Подловки собесов:** расскажи разницу между `Arena.ofConfined()` и `Arena.ofShared()`; как организовать upcalls (передача Java-функции в native) — интервьюер ожидает упоминание ограничений и безопасности. citeturn5search2turn5search6
+
+---
+
+# 4) Garbage collection: Generational ZGC и опции
+**Суть:** ZGC впервые появился в JDK11 как эксперимент, затем стал production; в JDK21 ZGC получил **generational** режим (JEP 439) — это серьёзное улучшение производительности для многих приложений. В JDK21 Generational ZGC доступен, его нужно включать флагами `-XX:+UseZGC -XX:+ZGenerational` (G1 остаётся дефолтом). citeturn2search8turn2search2turn9search2
+
+**Практические советы / ловушки:**
+- ZGC хорош для low-latency и больших heap; генерационное поведение улучшает throughput для коротко живущих объектов.
+- Не включай ZGC вслепую на проде — профайль и нагрузочное тестирование обязательны.
+- Как включить в Java 21: `java -XX:+UseZGC -XX:+ZGenerational -Xmx... -jar app.jar`. Документы HotSpot GC Tuning. citeturn9search2
+
+---
+
+# 5) API и стандартная среда: UTF-8 by default, HTTP client, Simple Web Server и Collections
+**UTF-8 by default:** начиная с JDK18 (включён в 21), стандартная кодировка по умолчанию для большинства API — UTF-8. Это может ломать старые проги, которые полагались на системную codepage. На собесах спрашивают: *какие эффекты при миграции Java11→21?* — ответ: поведение чтения/записи файлов/строк может поменяться. citeturn7search0turn7search9
+
+**HTTP Client:** новый `java.net.http.HttpClient` уже стал стандартом к Java11 — это одно из отличий Java8→11 (в 11 он стабилен). При миграции на 21 он по-прежнему актуален, но теперь можно комбинировать его с виртуальными потоками (упрощённый синхронный стиль). citeturn0search16
+
+**Sequenced Collections (JEP 431):** новые интерфейсы `SequencedCollection`, `SequencedSet`, `SequencedMap` унифицируют работу с коллекциями с определённым порядком (доступ к head/tail, reversed view). Это небольшое, но важное API-улучшение. citeturn10search0turn10search1
+
+### Небольшой пример по SequencedCollection
+```java
+import java.util.*;
+// Пример: используем SequencedCollection API
+public class SequencedDemo {
+    public static void main(String[] args) {
+        SequencedCollection<String> seq = new ArrayList<>(); // ArrayList реализует 'sequenced' контракт
+        seq.add("a"); // add last
+        seq.addFirst("head"); // метод родился в SequencedCollection (позволяет добавлять в начало)
+        System.out.println(seq.getFirst()); // получить первый элемент
+        System.out.println(seq.reversed()); // получить обратный view
+    }
+}
+```
+(внимание: конкретные методы зависят от типа; см. API JDK21). citeturn10search1
+
+---
+
+# 6) Preview / incubator фичи в Java 21 — осторожно в проде
+В Java 21 много preview/incipient фич (String Templates — JEP 430, Foreign Function API — preview, Scoped Values, Unnamed Patterns/Classes, Structured Concurrency — preview). На собесах часто интересуются: *какие фичи ещё preview и что с ними делать?* — правильный ответ: можно пробовать, но в проде риск: сигнатуры/поведение могут изменяться, требуется флаги `--enable-preview`. citeturn1view0turn5search9
+
+**Интервью-подвох:** если кандидат говорит "я использую / планирую использовать String Templates в проде" — уточни, финализированы ли они (в Java 21 — превью), и какие риски миграции при изменении синтаксиса.
+
+---
+
+# 7) Совместимость, де-прецеденты, удаление и deprecated
+- **Deprecated finalization (Object.finalize)** — помечено для удаления (JEP 421 в JDK18): нужно переходить на try-with-resources или Cleaner. Этот момент часто проверяют: *почему finalize плох и чем заменить?* — ответ: неопределённость вызова, resurrecting objects, безопасность. citeturn8search0turn8search4  
+- **Модули (JPMS)** — появились в JDK9; если проект на Java11 использует модули, при обновлении на 21 поведение модулей сохраняется, но некоторые internal-APIs все ещё недоступны — проверяй `jdeps`. (официальные миграционные заметки JDK21 есть у Oracle). citeturn0search12
+
+---
+
+# 8) Типичные собес-вопросы/ловушки и краткие ответы (чем хвалиться на собесе)
+1. **«Почему virtual threads лучше реактивного подхода?»** — простота: читаемый блокирующий код, масштабируемость; но реактив нужен там, где требуются tiny latency/throughput с минимальной GC нагрузкой на отдельных сценариях. (ожидают обсуждения tradeoffs). citeturn3search12  
+2. **«Record vs класс: когда использовать?»** — record для неизменяемых DTO; не подходит для сущностей JPA без адаптации; equals/hashCode автоматически на компонентах. citeturn4search4  
+3. **«Что делает JEP 400 (UTF-8 by default) и какие последствия?»** — делает поведение API предсказуемым; может поменять результат операций, где кодировка раньше зависела от платформы (например, FileReader без явной charset). citeturn7search0  
+4. **«Как включить generational ZGC?»** — `-XX:+UseZGC -XX:+ZGenerational` (в JDK21). citeturn9search2  
+5. **«FFM vs JNI — в чём разница?»** — FFM — более безопасный, высокоуровневый, управляемый Java API для native calls; preview в JDK21 — требует `--enable-preview`; JNI остаётся и будет поддерживаться. citeturn5search2
+
+---
+
+# 9) Практические советы по миграции 11 → 21 (что делать на проекте)
+- **Тесты**: запуск интеграционных тестов с `--enable-preview` для preview API, но для production избегать preview-features без оценки риска. citeturn5search3  
+- **Кодировка**: проверь чтение/запись файлов (особенно на Windows) — при необходимости явно указывай `Charset`. citeturn7search9  
+- **Библиотеки**: убедись, что ключевые библиотеки (ORM, драйвера, APM, profilers) поддерживают Java21 (особенно если используешь виртуальные потоки). citeturn3search6  
+- **GC & perf**: прогоняй нагрузочные тесты с ZGC/G1 и оценкой `-XX:+UseZGC -XX:+ZGenerational`. citeturn9search2
+
+---
+
+# 10) Короткий набор «must cite» ссылок (официальные первоисточники)
+- JEPs in JDK 21 (список JEP’ов, что попало в JDK21). citeturn1view0  
+- JEP 444 — Virtual Threads (финализация в JDK21). citeturn3search0  
+- JEP 440 / 441 — Record Patterns и Pattern Matching for switch (JDK21). citeturn4search3turn4search2  
+- JEP 442 — Foreign Function & Memory API (Third Preview). citeturn5search0  
+- JEP 439 — Generational ZGC (JDK21). citeturn2search2  
+- JEP 400 — UTF-8 by Default (JDK18+, важный эффект при миграции с 11). citeturn7search0
+
+---
+
+# Заключение — что реально запомнить для собеса (TL;DR)
+1. **Java 21 — качественный шаг вперёд по сравнению с 11.** Особенно по concurrency (virtual threads, structured concurrency), по языковым конструкциям (records/patterns/sealed), по нативной интеграции (FFM preview) и по GC (Generational ZGC). citeturn1view0turn3search0turn2search2  
+2. **На собеседовании** ожидают, что ты знаешь не только «что» появилось, но и *побочные эффекты*: совместимость, когда нельзя использовать preview, как virtual threads взаимодействуют с ThreadLocal / native calls, проблемы сериализации record и JPA, влияние UTF-8 default. citeturn4search0turn5search2turn7search0  
+3. **Практические навыки**, которыми стоит гордиться: показать код с record/patterns, расписать простой пример virtual threads и structured concurrency, объяснить как подключить FFM и какие опции GC пробовать.
+
+---
+
+Если хочешь — могу:
+- 1) Развернуть **твой** пример кода (если пришлёшь 1–2 файла проекта на Java11), и показать точечно, что поменять при переносе на Java21 (например, как заменить `ExecutorService` на virtual threads, где нужно указать `Charset` явно, как переписать DTO в record и учесть JPA/Jackson).  
+- 2) Подготовить список **6–8 типичных вопросов** для собеса Senior Java с готовыми ответами/кодом (включая «ловушки» и короткие пояснения).  
+
+Какой из двух вариантов сделать сейчас — миграционный разбор кода или набор вопросов с ответами? (могу сразу начать: если хочешь — делаю второй пункт — подготовлю набор вопросов+ответов).
 
 [Вопросы для собеседования](README.md)
