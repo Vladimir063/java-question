@@ -1417,4 +1417,370 @@ HBase и другими хранилищами данных в этой экос
 - **Kafka**: Сообщения сохраняются на диске в топиках до тех пор, пока не истечет срок хранения (по конфигурации). 
 Это позволяет повторно читать данные.
 
+Отлично — соберу для тебя **полный, развёрнутый, но понятный план** по Apache Kafka, который пригодится джaва-разработчику на собеседовании. Я объясню не только что такое и зачем, но и **тонкие** практические вопросы, хитрые кейсы и конфигурации, которые обычно спрашивают на интервью. Текст длинный и насыщенный — бери блокнот. Поехали.
+
+# 1. Краткий «на пальцах» обзор (что такое Kafka)
+Apache Kafka — это распределённая платформа потоковой передачи сообщений (distributed streaming platform). Основные её роли:
+- Буфер/транспорт сообщений между сервисами (как очередь, но более мощная).
+- Хранилище событий (log) — сообщения сохраняются отдельно по топикам/партициям и имеют офсеты.
+- Платформа для потоковой обработки (Kafka Streams, ksqlDB).
+
+Ключевая мысль: Kafka хранит поток сообщений в виде **неизменяемого лога**, разделённого на **топики**, а топики — на **партиции**. Партиция — это упорядоченный лог сообщений с монотонно растущими **offset** (индексами).
+
+---
+
+# 2. Основные понятия и термины (с пояснениями простым языком)
+
+**Broker** — сервер Kafka. Кластер — набор брокеров.  
+**Topic** — логическая категория/канал сообщений (например, `orders`).  
+**Partition** — физическая часть топика; у каждой партиции — собственный упорядоченный лог и офсеты.  
+**Offset** — целое число — позиция сообщения в партиции. Offset уникален в рамках одной партиции.  
+**Producer** — приложение, которое пишет (публикует) сообщения в топик.  
+**Consumer** — приложение, которое читает сообщения из топика.  
+**Consumer Group** — группа потребителей, которые совместно читают топик: каждый партиция в группе читается только одним consumer'ом из группы. Это позволяет масштабировать потребление.  
+**Leader / Follower (репликация)** — для каждой партиции один брокер — лидер (обрабатывает записи/чтение), остальные — followers — реплицируют журнал лидера.  
+**ISR (In-Sync Replicas)** — набор реплик, которые успевают держаться в актуальном состоянии (синхронны).  
+**Replication factor** — сколько копий данных хранится в кластере (рекомендуется ≥2, обычно 3).  
+**min.insync.replicas** — минимальное число реплик из ISR, которые должны зафиксировать запись при `acks=all`, иначе запись отклоняется — это защита от потерь данных.  
+**acks** — параметр продюсера, сколько подтверждений нужно от брокеров: `0`, `1`, `all` (или `-1` — эквивалент `all`).  
+**Retention** — время (или размер) хранения сообщений в партиции (например `retention.ms`).  
+**Cleanup policy** — `delete` (по времени/размеру) или `compact` (компактизация по ключу — useful для storage of latest state).  
+**Consumer offset commit** — сохранение позиции чтения (куда consumer уже дошёл). Хранится в специальном топике `__consumer_offsets`.  
+**Transaction / Idempotence** — механизмы для устранения дублей и достижения точности доставки «exactly-once» при определённых условиях.  
+
+---
+
+# 3. Архитектура записи/чтения — кто что делает и как
+**Запись (Producer → Broker):**
+- Producer формирует `ProducerRecord(topic, key?, value)` и вызывает `send()`.
+- По ключу (если есть) вычисляется партиция: `partition = hash(key) % numPartitions`. Если ключа нет — используется partitioner (в современных версиях — sticky partitioner для повышения батчинга; старые версии использовали round-robin).
+- Producer буферизует сообщения в батчи (RecordAccumulator) для каждой партиции, потом отправляет на лидера партиции.
+- Leader записывает в свой сегмент логов и отвечает producer'у согласно `acks`.
+- Follower'ы периодически тянут (fetch) у лидера и реплицируют записи.
+
+**Чтение (Broker → Consumer):**
+- Consumer (в группе) подписывается на топик. Координатор группы (broker) распределяет партии партиций между consumer'ами (assignment).
+- Consumer вызывает `poll()` — брокер возвращает сообщения из назначенных партиций начиная с их последнего коммита офсета.
+- После обработки consumer может `commit` офсет (автоматически или вручную).
+
+---
+
+# 4. Репликация, лидеры и устойчивость данных — что важно знать
+- Для партиции устанавливается replication factor (обычно 3). Один из брокеров становится **leader**, остальные — **followers**.
+- Все записи идут на **лидера**; followers тянут данные и реплицируют. Broker поддерживает ISR — тех, кто успел синхронизироваться.
+- Если лидер упал, происходит **election** — новый лидер выбирается из ISR. Если ISR пуст или `unclean.leader.election.enable=true`, можно выбрать несинхронную реплику → возможна потеря данных.
+- Чтобы **гарантировать, что запись уходит на несколько реплик**, используем `acks=all` у продюсера и `min.insync.replicas` > 1. Тогда при падении лидера, если недостаточно реплик в ISR — запись будет отклонена, и продюсер увидит ошибку.
+- Если `acks=1` (по умолчанию), запись считается успешной после записи у лидера — followers могут ещё не успеть → риск потери при падении лидера.
+
+---
+
+# 5. Гарантии доставки: at-most-once, at-least-once, exactly-once (и как их добиться)
+
+**At-most-once (не более одного раза)**  
+- Коммит офсета **до** обработки сообщения или auto-commit включён и commit происходит часто.  
+- Результат: если чтение доставлено, но приложение упало при обработке — данные потеряны (не будут повторно доставлены).  
+- Как добиться: `enable.auto.commit = true` (по умолчанию), либо делать `commitSync()` перед обработкой.
+
+**At-least-once (как минимум один раз — возможны дубли)**  
+- Коммит офсета **после** успешной обработки сообщения.  
+- Если приложение упало до коммита — при рестарте consumer прочитает сообщение снова → дубликат возможен.  
+- Как добиться: `enable.auto.commit=false` и `commitSync()` после успешной обработки. Продюсер при `acks=all` и retries помогает минимизировать потери, но дубли возможны.
+
+**Exactly-once (точно один раз)**  
+- Сложнее; в Kafka это достигается через **идемпотентный продюсер** и **транзакции** (EOS — exactly-once semantics).  
+- Producer: `enable.idempotence=true` (в новых клиентах по-умолчанию), `transactional.id` используется для транзакций.  
+- Поточный процесс "consume → produce" использует транзакции: начни транзакцию, прочитай, обработай, отправь новые сообщения, вызови `sendOffsetsToTransaction()` чтобы включить offset-commit в транзакцию, затем `commitTransaction()`. Это гарантирует, что либо всё (включая офсеты) зафиксировано, либо ничего — и при restart не будет дублей.  
+- Ограничения: требует поддержки брокером; сложнее в конфигурации; могут быть производительные и operational costs.
+
+---
+
+# 6. Практические параметры продюсера (важные конфиги и зачем они)
+
+- `acks=0|1|all` — как много подтверждений ждать. `all` с `min.insync.replicas` даёт лучшее сохранение.
+- `retries` — число попыток переслать сообщение при ошибке. Вкупе с `enable.idempotence` предотвращает дубли.
+- `enable.idempotence=true` — вкл. идемпотентность: producer генерирует sequence per partition, брокер отбрасывает дубли. Требует `max.in.flight.requests.per.connection` корректной настройки (ниже).
+- `max.in.flight.requests.per.connection` — сколько запросов одновременно может быть в полёте. Если >1 + retries >0 и idempotence выключен — возможна переупорядоченность сообщений при retry; с idempotence включённым Kafka гарантирует порядок даже с несколькими in-flight, но исторически рекомендовалось ограничить до 1 для строгого порядка.
+- `linger.ms` — ждать ли заполнения батча для лучшего throughput.
+- `batch.size` — размер батча в байтах.
+- `compression.type` — gzip, snappy, lz4, zstd — экономят сеть/диск.
+- `transactional.id` — если используешь транзакции, нужно задать уникальный `transactional.id` на продюсере.
+
+**Важно про порядок и дубли при продюсере:**
+- Порядок гарантируется **в пределах одной партиции**.
+- Если у тебя несколько in-flight запросов, retries и старые версии клиента — может быть переупорядочивание. С `enable.idempotence=true` и совместимой брокерной версией порядок и идемпотентность обеспечиваются с точки зрения дубликатов, но нужно понимать детали версии клиента и брокера.
+
+---
+
+# 7. Практические параметры консьюмера (важные конфиги и зачем они)
+
+- `group.id` — идентификатор consumer group.
+- `enable.auto.commit` — если true — Kafka периодически будет автокоммитить офсеты (нежелательно для гарантий).
+- `auto.commit.interval.ms` — интервал автокоммита.
+- `auto.offset.reset` — поведение, если офсета нет: `latest` (пропустить старые), `earliest` (прочитать всё с начала).
+- `max.poll.records` — сколько записей возвращается в `poll()` (важно для обработки и для `max.poll.interval.ms`).
+- `session.timeout.ms` и `heartbeat.interval.ms` — механика детекции падения consumer'а; если heartbeat не приходит в указанный `session.timeout.ms`, координатор считает consumer мёртв и триггерит ребаланс.
+- `max.poll.interval.ms` — если приложение долго обрабатывает записи и не вызывает `poll()` в течение этого времени — считается, что consumer «уполз», и происходит ребаланс.
+- `isolation.level` — `read_uncommitted` (по умолчанию) или `read_committed` (при использовании транзакций смотреть только коммитнутые записи).
+
+---
+
+# 8. Consumer Group, assignment и rebalance — кто что читает и когда
+- При подписке на топик, брокер-координатор для группы распределяет партиции между consumer'ами (assignment).
+- Правило: **каждая партиция может быть обслужена только одним consumer'ом из группы**. Это даёт параллелизм = числу потребляемых партиций (или меньше, если consumers < partitions).
+- Если consumers > partitions — некоторые будут простаивать.
+- Если consumers < partitions — некоторые consumers будут читать несколько партиций.
+- **Rebalance** — процесс перерасстановки assignment при изменении списка consumers (join/leave/crash) или при изменении подписки. Rebalance приводит к паузе потребления и потере местонахождения poll'ов, поэтому на интервью часто спрашивают о том, как минимизировать downtime (e.g. sticky assignment, cooperative-sticky, уменьшение частоты ребалансов).
+- Assignment strategies: `range`, `roundrobin`, `sticky`, `cooperative-sticky`. Sticky стремится минимизировать перемещения partition'ов между consumers для меньших пауз.
+
+**Commit offsets**:
+- Коммит указывает, до какого offset consumer успешно обработал. На практике делают `commitSync()` после успешной обработки (at-least-once) или используют `commitAsync()` с обработкой ошибок.
+- Есть `sendOffsetsToTransaction()` для включения офсетов в транзакцию продюсера.
+
+---
+
+# 9. Что будет в типичных собеседовательских «тонких» сценариях
+
+**Q: Что будет, если останется один consumer и будет несколько партиций?**  
+A: Один consumer получит в assignment все партиции, и он будет читать из всех них. Чтение возможно одновременно (брокер отдаёт батчи по разным партициям за один `poll()`) — но если ты обрабатываешь их последовательно в одном потоке, общая throughput ограничен. Ordering гарантируется в пределах каждой партиции, но **между партициями порядок не гарантирован**.
+
+**Q: Что будет, если останется один producer и много партиций?**  
+A: Producer будет писать в разные партиции. Если у сообщений есть ключ — Kafka хэширует ключ и направит все сообщения с одинаковым ключом в одну и ту же партицию (гарантирует порядок по ключу). Если ключа нет — современный default partitioner часто использует **sticky partitioner**, то есть будет отправлять последовательные записи в одну «липкую» партицию до заполнения батча, после чего переключится — это повышает batching/throughput, но значит последовательные безключевые записи могут идти в одну партицию, затем в другую. Если нужна строгая балансировка — можно использовать RoundRobinPartitioner или свой partitioner.
+
+**Q: Как гарантировать доставку? Как *не* гарантировать?**  
+- **Чтобы НЕ гарантировать** (быстро, без стабильности): `acks=0` у продюсера — producer не ждёт подтверждения, риск потери очень высок. У consumer можно `enable.auto.commit=true` -> commit происходит возможно до обработки — at-most-once.
+- **Чтобы ГАРАНТИРОВАТЬ устойчивость записи** (минимизировать потерю): `acks=all`, `min.insync.replicas` >= 2, replication factor >= 2/3, `enable.idempotence=true`, `retries>0`. Для доставки без дублей — использовать транзакции (exactly-once).
+- **Чтобы ГАРАНТИРОВАТЬ отсутствие дублей при обработке**: либо реализовать идемпотентную обработку на стороне потребителя (например, сохранять processed-idempotency-key в БД), либо использовать Kafka Transactions (если потребитель пишет в Kafka и хочет атомарно коммитить и продьюсить).
+
+**Q: Как гарантировать порядок? Как *не* гарантировать порядок?**  
+- **Порядок гарантируется в рамках партиции**. Если вы хотите строгий порядок для набора сообщений — назначайте их в одну партицию (по ключу) и обрабатывайте их в порядке offset.
+- Если messages распределяются по нескольким партициям — порядок между партициями не гарантируется.
+- Если consumer параллелит обработку одного шага с несколькими потоками и не контролирует порядок, можно сломать порядок — порядок оставляет ответственность за обработку приложению.
+
+**Q: Что будет, если сообщение потерялось?**  
+- Сценарии потери:
+  - Producer отправил `acks=0` → сообщение может быть потеряно (не доставлено лидеру).
+  - Producer `acks=1`, лидер принял, но лидер упал до репликации — если replicas не успели — данные потеряются.
+  - Некорректно настроен `min.insync.replicas`/`acks=all` → риск.
+  - Если включён `unclean.leader.election=true` и появляется лидер, который не имел последних записей — возможна потеря.
+- Как «реагировать»: увеличить replication factor, `acks=all`, `min.insync.replicas`, отключить unclean leader election, мониторить replica lag, использовать durability checks.
+
+**Q: Что будет, если offset потерялся?** (я предполагаю, что под «ассет» была опечатка и имелся в виду `offset`)  
+- Offset хранится в `__consumer_offsets`. Если офсет удалён (например, retention для этого топика короткий), и при рестарте consumer'a офсета нет — применяется `auto.offset.reset` (`earliest` или `latest`) — consumer начнёт чтение с начала или с конца.
+- Неправильный коммит (commit до обработки) → офсет перескакивает вперёд → потеря сообщений (at-most-once).
+- Потеря офсета при ручном хранении (в БД) — приложение должно иметь fallback стратегию.
+
+---
+
+# 10. Вопросы по масштабированию: сколько партиций / потребителей / продюсеров
+
+**Партиции**:
+- Партиции дают параллелизм: число потребителей в группе эффективно ограничено числом партиций (Nconsumers ≤ Npartitions).
+- Больше партиций → выше параллелизм, но и больше накладных расходов: метаданные, файловая сегментация, GC, longer recovery time on leader failover.
+- Рекомендация: выбирать количество партиций исходя из целевой throughput, latency requirements и hardware. Часто стартуют с 6–12 и масштабируют по необходимости, но для high-throughput распределённых систем — десятки/сотни партиций на топик.
+
+**Consumers**:
+- Если нужно параллельно обрабатывать N задач, создай ≥N партиций и запусти N consumer'ов в одной группе.
+- Если у тебя stateful-processing per key — ключи должны попадать в одну партицию, иначе состояние нужно синхронизировать.
+
+**Producers**:
+- Обычно один producer на процесс/инстанс; масштабируем, если надо увеличить throughput. Количество producers не ограничено партициями, но больше producers → больше конкурентного доступа к партициям.
+
+---
+
+# 11. Тонкие вопросы и «ловушки» (часто спрашивают на интервью)
+
+1. **Почему offset — не idempotency key?**  
+   Offset — позиция в партиции, он не уникален в контексте результатов обработки: если вы прочитали и обработали, но не закоммитили офсет, при рестарте вы прочитаете ещё раз → duplicate. Для идемпотентной логики нужен бизнес-ключ, либо транзакции.
+
+2. **Почему `enable.auto.commit=true` опасен?**  
+   Потому что Kafka будет коммитить офсеты автоматически, возможно до того, как обработка завершена — это даёт at-most-once и потерю данных при сбое.
+
+3. **Как избежать дублей при retry на продюсере?**  
+   Включить `enable.idempotence=true` и использовать `acks=all`. Тогда брокер может распознавать и отбрасывать повторные записи с одинаковым producer id и sequence number.
+
+4. **Почему `max.in.flight.requests.per.connection > 1` может привести к переупорядочению?**  
+   Если несколько запросов находятся в полёте и один из них переотправляется, ответы могут вернуться не в порядке отправки → порядок на лидер/реплике может нарушиться. Idempotence и новые протоколы это решают, но это частая ловушка для старых клиентов.
+
+5. **Что такое unclean leader election и почему он опасен?**  
+   При `unclean.leader.election.enable=true` Kafka может выбрать в лидеры реплику, которая вышла из ISR (не синхронизированную), чтобы повысить availability. Но тогда некоторые последние записи лидера могут быть потеряны (data loss). Для безопасности лучше `false`.
+
+6. **Что будет при ребалансе группы во время обработки сообщений?**  
+   Пока идёт ребаланс, consumer'ы могут быть переассайнены — messages в процессе обработки могут быть обработаны повторно / commited некорректно, если не продумана логика. Решения: уменьшать частоту ребалансов (sticky), использование cooperative rebalance, грамотно настраивать `session.timeout`, `max.poll.interval.ms`, используя `pause()`/`resume()` и правильные commit-паттерны.
+
+7. **Как делать масштабируемую обработку без потери порядка?**  
+   Распределяй ключи так, чтобы относящиеся сообщения шли в одну партицию; обрабатывать партицию в одном потоке; если нужен конкурентный обработчик — группируй по ключам и используйте per-key queues.
+
+8. **Какие сценарии могут привести к дублированию при `retries` у продюсера?**  
+   Если продюсер отправил запись, получил ошибку связи, попытался снова — брокер мог принять сообщение, но продюсер не получил подтверждение; при reconnect и без идемпотентности запись может быть записана снова → duplication.
+
+---
+
+# 12. Практические Java-фрагменты (важно для собеседования)
+
+### Producer — базовый пример (Java)
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "broker1:9092,broker2:9092");
+props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+props.put("acks", "all"); // wait for all ISR
+props.put("enable.idempotence", "true"); // idempotent producer
+props.put("retries", Integer.toString(Integer.MAX_VALUE));
+props.put("max.in.flight.requests.per.connection", "5"); // safe with idempotence enabled in newer clients
+
+KafkaProducer<String, String> producer = new KafkaProducer<>(props);
+ProducerRecord<String, String> record = new ProducerRecord<>("orders", orderId, orderJson);
+
+producer.send(record, (metadata, exception) -> {
+    if (exception != null) {
+        // handle error (log/metrics/retry policy)
+    } else {
+        System.out.println("Sent to partition " + metadata.partition() + " offset " + metadata.offset());
+    }
+});
+producer.flush();
+producer.close();
+```
+
+### Consumer — базовый пример (Java) — at-least-once (commit после обработки)
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "broker1:9092");
+props.put("group.id", "order-processor");
+props.put("enable.auto.commit", "false"); // manual commit
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("max.poll.records", "100");
+
+KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Collections.singletonList("orders"));
+
+try {
+    while (true) {
+        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
+        for (ConsumerRecord<String, String> rec : records) {
+            // process(rec.value())
+        }
+        // commit offsets after processing batch
+        consumer.commitSync();
+    }
+} finally {
+    consumer.close();
+}
+```
+
+### Producer транзакции (пример consume-transform-produce с транзакцией)
+```java
+# producer with transactional.id
+props.put("enable.idempotence", "true");
+props.put("transactional.id", "tx-producer-1");
+KafkaProducer<String, String> txProducer = new KafkaProducer<>(props);
+txProducer.initTransactions();
+
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
+    txProducer.beginTransaction();
+    try {
+        for (ConsumerRecord<String, String> r : records) {
+            // transform and produce to some output topic
+            txProducer.send(new ProducerRecord<>("out-topic", r.key(), transform(r.value())));
+        }
+        // commit consumer offsets as part of the same transaction:
+        Map<TopicPartition, OffsetAndMetadata> offsetsToCommit = Collections.singletonMap(
+            new TopicPartition(records.partitions().iterator().next()), // simplified
+            new OffsetAndMetadata(lastProcessedOffset + 1)
+        );
+        txProducer.sendOffsetsToTransaction(offsetsToCommit, consumer.groupMetadata());
+        txProducer.commitTransaction();
+    } catch (Exception e) {
+        txProducer.abortTransaction();
+    }
+}
+```
+(в реале нужно аккуратно собирать offsetsToCommit; пример иллюстративен)
+
+---
+
+# 13. Администрирование и мониторинг — что смотреть на проде
+- **Replica lag** — насколько followers отстают от лидера (настрой alert если lag > threshold).  
+- **Under-replicated partitions** — если >0 → риск потери данных.  
+- **Consumer lag** — сколько сообщений в очереди не обработано (important for SLOs).  
+- **Broker disk usage, GC pauses, network I/O**.  
+- **Rate of rebalances**, количество `PartitionsMoved` и т.д.  
+- Используем: `kafka-consumer-groups.sh --describe` для lag, `kafka-topics.sh --describe` для репликации, JMX metrics (Kafka экспортирует множество метрик).  
+
+---
+
+# 14. Retention / Compaction — что спрашивают и почему важно
+- `retention.ms` — время хранения; старые сообщения удаляются по истечении срока. Если приложение хранит state путём чтения всего топика, уменьшение retention может «стереть историю», потому настройка важна.
+- `cleanup.policy=compact` — оставляет только последние значения для каждого ключа (useful для changelog/state store). Комбинация `compact,delete` тоже возможна.
+- На интервью часто спрашивают: **как хранить только последние состояния по ключу** → используем compaction.
+
+---
+
+# 15. Безопасность (коротко, но достаточно)
+- **SSL/TLS** для шифрования трафика.  
+- **SASL** (PLAIN, SCRAM, GSSAPI/Kerberos) для аутентификации.  
+- **ACLs** для авторизации (кто имеет право читать/писать/администрировать топики).  
+- **Encryption at rest** (на уровне ОС/диска), если требуется.
+
+---
+
+# 16. Часто задаваемые interview-вопросы (шаблоны и короткие ответы)
+- **Как Kafka обеспечивает персистентность?** — логи на диске, репликация; leader пишет, followers реплицируют; `acks=all + min.insync.replicas` обеспечивает durability.
+- **Где хранятся офсеты?** — в `__consumer_offsets` (topic).
+- **Что такое compaction?** — оставляет только последние записи по ключу, полезно для восстановления состояния.
+- **Как выполняется лидер-выбор?** — в старых версиях — Zookeeper, в новых — internal controller (KIP-500) — но с точки зрения dev'а важен результат: новый лидер выбирается из ISR. (На собеседовании могут спросить про KIP-500, если тема администрирования/архитектуры — будь готов: сейчас Kafka движется к удалению ZK.)
+- **Как детектируется падение consumer?** — по heartbeat -> `session.timeout.ms` и `heartbeat.interval.ms`.
+- **Почему сообщения могут приходить в неправильном порядке?** — если используются несколько партиций или при многопоточой обработке внутри одного consumer'а неконтролируемо перемешиваются offsets.
+
+---
+
+# 17. Best practices для Java-разработчика (чеклист)
+- Всегда обдумывай **partitioning strategy**: ключи для обеспечения порядка & sharding.
+- Держи **партиций >= количества параллельных потребителей**, но не слишком много (управляемое число).
+- Используй `enable.auto.commit=false` и коммить offsets вручную после успешной обработки.
+- Для снижения дублей — используйте idempotence & transactions где необходимо.
+- Для большой нагрузки — тюнь `linger.ms`, `batch.size`, `compression.type`.
+- Мониторь lag/under-replicated partitions/ISR.
+- Обрабатывай ребаланcы: используй `ConsumerRebalanceListener` чтобы корректно сохранить/восстановить state.
+- Для stateful processing используйте Kafka Streams / ksqlDB, они скрывают много сложности и поддерживают EOF/restore patterns.
+
+---
+
+# 18. Практические советы по ответам на интервью (как формулировать)
+- При ответе начинай с **короткого утверждения**, затем подробно обоснуй, приведи пример конфигурации и разберись в edge-cases.
+- Если вопрос про «что случится если…» — всегда называй предпосылки (какие конфиги стоят: acks, replication factor, min.insync.replicas, enable.idempotence), потому что поведение зависит от них.
+- Если спросят «как добиться exactly-once» — скажи: `enable.idempotence=true`, `transactional.id`, используем `beginTransaction()`, `sendOffsetsToTransaction()` и `commitTransaction()`; упомяни о `isolation.level=read_committed`.
+- Для вопросов про масштабирование — говори не только про number-of-partitions, но и про накладные расходы (disk I/O, leader recovery time, metadata overhead).
+
+---
+
+# 19. Короткие ответы на «ловушки» (для быстрого повторения перед интервью)
+- Порядок? — ГАРАНТИРУЕТСЯ в партиции, не между партициями.  
+- Один consumer и много партиций? — consumer получит все партиции и обработает их; параллелизм = 1 поток на consumer.  
+- Один producer и много партиций? — если ключа нет — default partitioner (sticky) распределяет батчи; если ключ есть — hash(key) → partition.  
+- Потеря данных? — проверь `acks`, `min.insync.replicas`, `unclean.leader.election`.  
+- Дубли? — `enable.idempotence` + транзакции, либо идемпотентная обработка на стороне приложения.
+
+---
+
+# 20. Резюме / план для запоминания (шпаргалка)
+1. Kafka = топики → партиции → офсеты.  
+2. Репликация: leader + followers + ISR.  
+3. `acks` + `min.insync.replicas` → durability.  
+4. Ordering: per-partition. Use keys for ordering.  
+5. Delivery guarantees: at-most-once (commit before processing), at-least-once (commit after processing), exactly-once (transactions + idempotence).  
+6. Consumers: параллелизм = partitions; rebalance — пауза; коммиты → `__consumer_offsets`.  
+7. Producer: batching, compression, retries, idempotence, transactional.id.  
+8. Мониторинг: consumer lag, under-replicated partitions, replica lag.
+
+---
+
+Если хочешь, могу:
+- дать компактный чеклист «что настроить для production» (конфиги broker'ов и клиентов),
+- подготовить конкретные **вопросы-ответы** в формате «вопрос на интервью — короткий ответ + 2–3 предложения разъяснения»,
+- или разобрать **тестовый кейс** (например: в кластере 3 брокера, топик с RF=2, min.insync.replicas=2, acks=all — что произойдёт при падении одного брокера?).
+
+
 [к оглавлению](#apache-kafka)
