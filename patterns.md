@@ -142,9 +142,490 @@ __Сохранение или смерть (Save or die)__: Сохранение
 __Dependency Injection (внедрение зависимости)__ - это набор паттернов и принципов разработки програмного обеспечения, которые позволяют писать слабосвязный код. В полном соответствии с принципом единой обязанности объект отдаёт заботу о построении требуемых ему зависимостей внешнему, специально предназначенному для этого общему механизму.
 
 [к оглавлению](#Шаблоны-проектирования)
+# Введение — что такое **порождающие (creational)** паттерны
+Порождающие паттерны проектирования решают, **как правильно создавать объекты**. Они помогают отделить логику создания от использования, делают код гибче, проще для тестирования и расширения. На собеседовании от вас ожидают не только определения, но и понимание **когда** и **почему** применять каждый паттерн, плюсы/минусы и практические примеры.
 
-# Источники
-+ [Википедия](https://ru.wikipedia.org/wiki/Шаблон_проектирования)
-+ [Javenue](http://www.javenue.info/post/56)
+Ниже — подробные объяснения (простым языком), реальные сценарии и готовые Java-примеры с подробными комментариями на русском. После каждого блока — полностью рабочий пример в одном файле (один public класс + вспомогательные), чтобы вы могли скопировать и вставить в IDE.
+
+---
+
+# 1. Фабрика (Simple Factory) и Фабричный метод (Factory Method)
+### Идея (простыми словами)
+- **Simple Factory** — это просто класс/метод, который создаёт объекты разных типов по входным параметрам. Неофициальный паттерн (не в GOF), но часто используется.
+- **Factory Method** — переопределяемый метод (обычно в абстрактном классе или интерфейсе), который делегирует создание конкретных объектов подклассам. Это официальный GOF-паттерн.
+
+### Когда и зачем использовать
+- Нужна централизованная логика создания объектов (когда создание — не тривиально).
+- Когда нужно скрыть конкретные классы от клиента (инверсия зависимостей).
+- Когда требуется расширяемость: добавление нового продукта не должно ломать код клиента.
+- Simple Factory — подходит для небольших случаев; Factory Method — при потребности в расширяемости через наследование.
+
+### Плюсы / минусы
++ Снижает связанность кода (client не знает конкретных классов).  
++ Упрощает замену/добавление новых типов.  
+− Может привести к большому числу классов (особенно Factory Method).  
+− Simple Factory может стать «God class», если он слишком большой.
+
+### Пример: Factory Method — транспорт (road/ship/air)
+```java
+// FactoryMethodDemo.java
+// Простой демонстрационный пример паттерна Factory Method.
+// Все классы находятся в одном файле для удобства копирования в IDE.
+// Public-класс соответствует имени файла.
+
+// Добавлены аннотации Lombok для демонстрации их использования (хотя в простых классах Lombok не обязателен).
+import lombok.NoArgsConstructor;
+import lombok.ToString;
+
+public class FactoryMethodDemo {
+    public static void main(String[] args) {
+        // Клиент работает с создателем, не зная конкретного транспорта.
+        Creator roadCreator = new RoadLogistics();
+        Transport t1 = roadCreator.createTransport();
+        t1.deliver();
+
+        Creator seaCreator = new SeaLogistics();
+        Transport t2 = seaCreator.createTransport();
+        t2.deliver();
+
+        // Добавление нового транспорта = добавление нового класса Creator + Product,
+        // клиентский код не изменяется.
+    }
+}
+
+// --- Product интерфейс ---
+interface Transport {
+    void deliver(); // метод для доставки
+}
+
+// --- Concrete Products ---
+@NoArgsConstructor
+@ToString
+class Truck implements Transport {
+    @Override
+    public void deliver() {
+        // Конкретная реализация доставки для грузовика
+        System.out.println("Доставка грузовиком по дороге");
+    }
+}
+
+@NoArgsConstructor
+@ToString
+class Ship implements Transport {
+    @Override
+    public void deliver() {
+        System.out.println("Доставка кораблем по морю");
+    }
+}
+
+// --- Creator (абстрактный) ---
+abstract class Creator {
+    // Фабричный метод — возвращает интерфейс Transport.
+    // Подклассы решают, какой конкретно транспорт создать.
+    public abstract Transport createTransport();
+
+    // Допустим у Creator есть общая логика:
+    public void planDelivery() {
+        Transport transport = createTransport();
+        // общая логика использования продукта
+        System.out.println("Планирование доставки...");
+        transport.deliver();
+    }
+}
+
+// --- Concrete Creators ---
+@NoArgsConstructor
+class RoadLogistics extends Creator {
+    @Override
+    public Transport createTransport() {
+        // можно добавить логику выбора конфигурации Truck
+        return new Truck();
+    }
+}
+
+@NoArgsConstructor
+class SeaLogistics extends Creator {
+    @Override
+    public Transport createTransport() {
+        return new Ship();
+    }
+}
+```
+
+---
+
+# 2. Абстрактная фабрика (Abstract Factory)
+### Идея (простыми словами)
+Абстрактная фабрика предоставляет интерфейс для создания **семейств связанных объектов** (например, виджеты для разных платформ), не указывая их конкретных классов. Это удобно, когда объекты должны работать вместе (совместимы по интерфейсу/стилю).
+
+### Когда и зачем использовать
+- Когда нужно создать семейства взаимосвязанных объектов (например, темы UI — кнопка + чекбокс + поле ввода).
+- Когда важно, чтобы продукты одного семейства были совместимы.
+- Когда нужно менять семейство продуктов во время выполнения (поддержка тем/платформ).
+
+### Плюсы / минусы
++ Хорошо обеспечивает единообразие продуктов (семейства совместимы).  
++ Упрощает замену семейства продуктов целиком.  
+− Усложняет добавление новых типов продуктов (добавая новый продукт — нужно изменить интерфейсы/все фабрики).
+
+### Пример: семейства виджетов (Windows / Mac)
+```java
+// AbstractFactoryDemo.java
+// Демонстрация Abstract Factory на примере UI-виджетов (Button + Checkbox).
+// Все классы в одном файле для удобного копирования.
+
+// Добавлены аннотации Lombok (@ToString) для демонстрации, где это уместно.
+import lombok.ToString;
+
+public class AbstractFactoryDemo {
+    public static void main(String[] args) {
+        UIFactory factory = new WindowsFactory();
+        Button winButton = factory.createButton();
+        Checkbox winCheckbox = factory.createCheckbox();
+        winButton.paint();
+        winCheckbox.paint();
+
+        // Теперь сменим семью на Mac
+        UIFactory macFactory = new MacFactory();
+        macFactory.createButton().paint();
+        macFactory.createCheckbox().paint();
+    }
+}
+
+// --- Abstract Products ---
+interface Button {
+    void paint();
+}
+
+interface Checkbox {
+    void paint();
+}
+
+// --- Concrete Products for Windows ---
+@ToString
+class WindowsButton implements Button {
+    @Override
+    public void paint() {
+        System.out.println("Рисуем кнопку в стиле Windows");
+    }
+}
+
+@ToString
+class WindowsCheckbox implements Checkbox {
+    @Override
+    public void paint() {
+        System.out.println("Рисуем чекбокс в стиле Windows");
+    }
+}
+
+// --- Concrete Products for Mac ---
+@ToString
+class MacButton implements Button {
+    @Override
+    public void paint() {
+        System.out.println("Рисуем кнопку в стиле Mac");
+    }
+}
+
+@ToString
+class MacCheckbox implements Checkbox {
+    @Override
+    public void paint() {
+        System.out.println("Рисуем чекбокс в стиле Mac");
+    }
+}
+
+// --- Abstract Factory ---
+interface UIFactory {
+    Button createButton();
+    Checkbox createCheckbox();
+}
+
+// --- Concrete Factories ---
+class WindowsFactory implements UIFactory {
+    @Override
+    public Button createButton() { return new WindowsButton(); }
+    @Override
+    public Checkbox createCheckbox() { return new WindowsCheckbox(); }
+}
+
+class MacFactory implements UIFactory {
+    @Override
+    public Button createButton() { return new MacButton(); }
+    @Override
+    public Checkbox createCheckbox() { return new MacCheckbox(); }
+}
+```
+
+---
+
+# 3. Builder (Строитель)
+### Идея (простыми словами)
+Builder отделяет процесс построения сложного объекта от его представления. Особенно полезен, когда конструктор класса принимает много параметров (особенно опциональных), и хочется избежать "конструкторского ада" (много конструкторов с разными комбинациями параметров).
+
+### Когда и зачем использовать
+- Объект имеет много полей (часто опциональных).
+- Нужна читабельная и безопасная конструкция (иммутабельность).
+- Требуется пошаговая конфигурация и валидация перед созданием.
+- Полезен в DSL-подходе (цепочки вызовов).
+
+### Плюсы / минусы
++ Улучшает читаемость кода при создании сложных объектов.  
++ Позволяет делать объект immutable.  
+− Небольшой дополнительный код (класс Builder), но обычно оправдан.
+
+### Пример: построение объекта `User` с множеством опциональных полей
+```java
+// BuilderDemo.java
+// Пример паттерна Builder на классе User.
+// Внутри статический вложенный Builder: класс User становится иммутабельным.
+
+// Здесь заменяем ручной Builder на Lombok @Builder для сокращения кода.
+// Lombok сгенерирует класс Builder автоматически, а также геттеры и toString.
+import lombok.Builder;
+import lombok.Getter;
+import lombok.ToString;
+
+public class BuilderDemo {
+    public static void main(String[] args) {
+        // Пример использования билдера.
+        User user = User.builder()
+                .email("ivan@example.com") // обязательное поле
+                .firstName("Иван")
+                .lastName("Иванов")
+                .age(35)
+                .phone("+7-900-123-45-67")
+                .build();
+
+        System.out.println(user);
+    }
+}
+
+@Getter
+@ToString
+@Builder
+final class User {
+    // обязательное
+    private final String email;
+    // опциональные
+    private final String firstName;
+    private final String lastName;
+    private final Integer age;
+    private final String phone;
+}
+```
+
+---
+
+# 4. Singleton (Одиночка)
+### Идея (простыми словами)
+Паттерн обеспечивает наличие **только одного экземпляра** класса и глобальную точку доступа к нему.
+
+### Когда и зачем использовать
+- Нужно глобальное, совместно используемое состояние (например, конфигурация приложения, пул соединений, логгер).  
+- Важно, чтобы экземпляр был один в рамках JVM.
+
+### Важно на интервью
+- Обсуждают проблемы многопоточности и сериализации.
+- Покажите разные реализации (eager, lazy с double-check, Enum) и объясните плюсы/минусы.
+
+### Плюсы / минусы
++ Удобен для глобального состояния.  
+− Может стать глобальной переменной (anti-pattern) — усложняет тестирование (мокирование).  
+− Ошибки при сериализации, клонировании и многопоточности — нужно быть аккуратным.
+
+### Примеры: Eager, Lazy (Double-checked), Enum
+```java
+// SingletonDemo.java
+// Три варианта реализации Singleton — в одном файле для демонстрации.
+// В реальном проекте выберите один подход (часто рекомендуют enum-одиночку).
+
+// Lombok можно использовать для генерации геттеров/логирования, например @Getter или @Slf4j.
+// Здесь добавим @Getter в качестве примера.
+import lombok.Getter;
+
+public class SingletonDemo {
+    public static void main(String[] args) {
+        System.out.println("Eager: " + EagerSingleton.getInstance());
+        System.out.println("LazyDCL: " + LazyDCLSingleton.getInstance());
+        System.out.println("Enum: " + EnumSingleton.INSTANCE);
+
+        // Проверка, что ссылки одинаковы
+        System.out.println("Eager same? " + (EagerSingleton.getInstance() == EagerSingleton.getInstance()));
+        System.out.println("LazyDCL same? " + (LazyDCLSingleton.getInstance() == LazyDCLSingleton.getInstance()));
+        System.out.println("Enum same? " + (EnumSingleton.INSTANCE == EnumSingleton.INSTANCE));
+    }
+}
+
+// --- Eager initialization (простая и потокобезопасная при загрузке класса) ---
+@Getter
+class EagerSingleton {
+    // Экземпляр создаётся при загрузке класса
+    private static final EagerSingleton INSTANCE = new EagerSingleton();
+
+    // Приватный конструктор — нельзя создать извне
+    private EagerSingleton() {}
+
+    public static EagerSingleton getInstance() {
+        return INSTANCE;
+    }
+}
+
+// --- Lazy initialization с double-checked locking (DCL) ---
+@Getter
+class LazyDCLSingleton {
+    // volatile важен для корректности double-checked locking
+    private static volatile LazyDCLSingleton instance;
+
+    private LazyDCLSingleton() {}
+
+    public static LazyDCLSingleton getInstance() {
+        // Сначала без синхронизации (быстрая проверка)
+        if (instance == null) {
+            synchronized (LazyDCLSingleton.class) {
+                // Проверяем ещё раз внутри synchronized
+                if (instance == null) {
+                    instance = new LazyDCLSingleton();
+                }
+            }
+        }
+        return instance;
+    }
+}
+
+// --- Enum singleton (лучший вариант в большинстве случаев) ---
+enum EnumSingleton {
+    INSTANCE; // единственный экземпляр
+
+    // Можно хранить состояние и методы
+    public void doSomething() {
+        System.out.println("EnumSingleton doing something");
+    }
+}
+```
+
+**Рекомендация:** в большинстве случаев `enum`-singleton — самый безопасный и простой способ, потому что он автоматически защищён от проблем с сериализацией и отражением (reflection).
+
+---
+
+# 5. Prototype (Прототип)
+### Идея (простыми словами)
+Prototype — создаём новые объекты путём клонирования (копирования) существующего экземпляра-прототипа. Удобно, когда создание объекта «дорогое» (сложная инициализация), либо когда нужно быстро получить копию с небольшими изменениями.
+
+### Когда и зачем использовать
+- Стоимость создания нового объекта высокая (ресурсоёмкая инициализация).
+- Нужно много схожих объектов, которые отличаются небольшими деталями.
+- Желание получать копии без знания точного конкретного класса (через интерфейс clone).
+
+### Важные нюансы в Java
+- `Cloneable` и метод `clone()` — исторически спорны (поведение дефолтного `Object.clone()` делает поверхностное копирование).
+- Для глубокого копирования часто нужно вручную клонировать вложенные объекты или использовать сериализацию/копирующие конструкторы.
+- На интервью можно показать и `clone()` и альтернативный способ — копирующий конструктор/фабрика копий.
+
+### Пример: shallow & deep clone
+```java
+// PrototypeDemo.java
+// Демонстрация shallow и deep clone на объекте Document, содержащем Metadata.
+// Используем Cloneable для примера, и также покажем копирующий конструктор для deep copy.
+
+// Lombok используется для сокращения шаблонного кода (геттеры/сеттеры/toString)
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+
+public class PrototypeDemo {
+    public static void main(String[] args) throws CloneNotSupportedException {
+        Metadata meta = new Metadata("Иван", "2025-09-06");
+        Document original = new Document("Отчёт", "Тело отчёта", meta);
+
+        // shallow clone (через clone) — metadata будет общим (shared reference)
+        Document shallow = original.clone();
+        System.out.println("original metadata author: " + original.getMetadata().getAuthor());
+        System.out.println("shallow metadata author:  " + shallow.getMetadata().getAuthor());
+
+        // Изменим метаданные в shallow
+        shallow.getMetadata().setAuthor("Пётр");
+        System.out.println("После изменения shallow:");
+        System.out.println("original metadata author: " + original.getMetadata().getAuthor()); // изменилось — демонстрация shallow
+
+        // Deep clone через копирующий конструктор
+        Document deep = new Document(original); // copy constructor
+        deep.getMetadata().setAuthor("Мария");
+        System.out.println("После изменения deep:");
+        System.out.println("original metadata author: " + original.getMetadata().getAuthor()); // не изменилось
+    }
+}
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+class Metadata implements Cloneable {
+    private String author;
+    private String date;
+
+    @Override
+    protected Metadata clone() throws CloneNotSupportedException {
+        // Для метаданных shallow clone достаточно (если все поля примитивы/immutable).
+        return (Metadata) super.clone();
+    }
+}
+
+@Data
+class Document implements Cloneable {
+    private String title;
+    private String body;
+    private Metadata metadata;
+
+    public Document(String title, String body, Metadata metadata) {
+        this.title = title;
+        this.body = body;
+        this.metadata = metadata;
+    }
+
+    // Копирующий конструктор для deep copy
+    public Document(Document other) {
+        this.title = other.title;
+        this.body = other.body;
+        // Для глубокого копирования создаём новый объект Metadata (который клонируем)
+        try {
+            this.metadata = other.metadata.clone();
+        } catch (CloneNotSupportedException e) {
+            // fallback — создать вручную
+            this.metadata = new Metadata(other.metadata.getAuthor(), other.metadata.getDate());
+        }
+    }
+
+    @Override
+    protected Document clone() throws CloneNotSupportedException {
+        // По умолчанию суперкласс делает поверхностное копирование
+        return (Document) super.clone();
+    }
+
+    // геттер для metadata
+    public Metadata getMetadata() { return metadata; }
+}
+```
+
+**Практический совет:** на интервью можно сказать, что `Cloneable` в Java спорен, и предпочитаете контролируемое копирование (копирующие конструкторы / фабрики), особенно для глубокого копирования.
+
+---
+
+# Заключение — как выбирать паттерн
+- Нужен один глобальный экземпляр → **Singleton** (с осторожностью; лучше enum).
+- Нужна простая централизация создания → **Simple Factory**.
+- Требуется расширяемость создания через подклассы → **Factory Method**.
+- Нужна гибкая смена семейства совместимых продуктов → **Abstract Factory**.
+- Объект создаётся с большим количеством опций / хотите immutable → **Builder**.
+- Нужно клонирование/быстро создавать похожие объекты / избежать дорогой инициализации → **Prototype** (предпочтительно через контролируемые копии).
+
+---
+
+Если хочешь, могу:
+- Написать JUnit-тесты для каждого примера.
+- Переписать примеры под Spring/DI (например, показать как Singleton-паттерн реализуется через Spring Bean scope).
+- Сделать одно обобщённое PDF-шпаргалку для собеседования (готовый файл, который можно распечатать).
+
+Напиши, что из этого нужно — и я сделаю прямо здесь.
+
 
 [Вопросы для собеседования](README.md)
