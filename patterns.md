@@ -1191,6 +1191,7 @@ class SugarDecorator extends CoffeeDecorator {
 
 ---
 
+
 # Заключение
 - **Adapter** — подключаем несовместимые интерфейсы.  
 - **Composite** — дерево объектов (часть-целое).  
@@ -1199,6 +1200,773 @@ class SugarDecorator extends CoffeeDecorator {
 - **Facade** — упрощаем доступ к сложной системе.  
 - **Bridge** — разделяем абстракцию и реализацию.  
 - **Decorator** — добавляем функциональность объекту динамически.
+
+# Поведенческие паттерны проектирования
+
+## 1. Template Method (Шаблонный метод)
+**Описание:** Шаблонный метод позволяет определить общий алгоритм в виде последовательности шагов в базовом классе, при этом оставляя конкретную реализацию отдельных шагов подклассам. Такой подход помогает повторно использовать код и обеспечивает единообразие алгоритмов, при этом позволяя подклассам менять только детали без изменения общей структуры.
+
+**Плюсы:**
+- Централизованное управление алгоритмом.
+- Возможность переопределять отдельные шаги алгоритма.
+
+**Минусы:**
+- Подклассы жестко зависят от структуры базового класса.
+- Меньшая гибкость по сравнению с Strategy.
+
+**Когда применять:**
+- Когда есть повторяющаяся структура алгоритма и необходимо менять только отдельные шаги.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+abstract class DataProcessor {
+    public final void process() {
+        readData();  // шаг 1: чтение данных
+        processData(); // шаг 2: обработка данных
+        saveData();    // шаг 3: сохранение данных
+    }
+
+    protected abstract void readData();
+    protected abstract void processData();
+    protected abstract void saveData();
+}
+
+@Slf4j
+class CSVDataProcessor extends DataProcessor {
+    @Override
+    protected void readData() {
+        log.info("Чтение CSV данных");
+    }
+
+    @Override
+    protected void processData() {
+        log.info("Обработка CSV данных");
+    }
+
+    @Override
+    protected void saveData() {
+        log.info("Сохранение CSV данных");
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        DataProcessor processor = new CSVDataProcessor();
+        processor.process();
+    }
+}
+```
+
+---
+
+## 2. Mediator (Посредник)
+**Описание:** Посредник централизует взаимодействие между объектами. Вместо того чтобы компоненты напрямую ссылались друг на друга, они общаются через посредника. Это снижает связность и упрощает поддержку сложных систем с большим количеством взаимозависимых объектов.
+
+**Плюсы:**
+- Уменьшение связности компонентов.
+- Упрощение изменений и добавления новых взаимодействий.
+
+**Минусы:**
+- Посредник может стать слишком сложным и тяжёлым для поддержки.
+
+**Когда применять:**
+- Когда много объектов взаимодействуют друг с другом и необходимо централизовать это взаимодействие.
+
+```java
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+class Mediator {
+    public void notify(Component sender, String event) {
+        if (event.equals("A")) {
+            log.info("Mediator реагирует на событие A и инициирует действия B");
+        } else if (event.equals("B")) {
+            log.info("Mediator реагирует на событие B и инициирует действия A");
+        }
+    }
+}
+
+@Data
+class Component {
+    private Mediator mediator;
+
+    public void trigger(String event) {
+        log.info("Component триггерит событие: {}", event);
+        mediator.notify(this, event);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Mediator mediator = new Mediator();
+        Component comp1 = new Component();
+        Component comp2 = new Component();
+
+        comp1.setMediator(mediator);
+        comp2.setMediator(mediator);
+
+        comp1.trigger("A");
+        comp2.trigger("B");
+    }
+}
+```
+
+---
+
+## 3. Chain of Responsibility (Цепочка обязанностей)
+**Описание:** Позволяет передавать запрос по цепочке объектов до тех пор, пока один из них не обработает его. Отправитель запроса не знает, какой объект его обработает, что делает систему гибкой и легко расширяемой.
+
+**Плюсы:**
+- Гибкость в обработке запросов.
+- Разделение обязанностей.
+
+**Минусы:**
+- Нет гарантии, что запрос будет обработан.
+- Цепочка может стать слишком длинной.
+
+**Когда применять:**
+- Когда запрос может быть обработан несколькими объектами и нужно избегать жёсткой зависимости.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+abstract class Handler {
+    protected Handler next;
+
+    public void setNext(Handler next) {
+        this.next = next;
+    }
+
+    public abstract void handle(String request);
+}
+
+@Slf4j
+class ConcreteHandlerA extends Handler {
+    @Override
+    public void handle(String request) {
+        if (request.equals("A")) {
+            log.info("Handler A обработал запрос");
+        } else if (next != null) {
+            next.handle(request);
+        }
+    }
+}
+
+@Slf4j
+class ConcreteHandlerB extends Handler {
+    @Override
+    public void handle(String request) {
+        if (request.equals("B")) {
+            log.info("Handler B обработал запрос");
+        } else if (next != null) {
+            next.handle(request);
+        }
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Handler handlerA = new ConcreteHandlerA();
+        Handler handlerB = new ConcreteHandlerB();
+        handlerA.setNext(handlerB);
+
+        handlerA.handle("B");
+    }
+}
+```
+
+---
+
+## 4. Observer (Наблюдатель)
+**Описание:** Наблюдатель позволяет объектам подписываться на события другого объекта и автоматически получать уведомления об изменениях. Основная цель — слабая связка между объектами: субъекты уведомляют наблюдателей без знания их внутренней реализации.
+
+**Плюсы:**
+- Слабая связка между объектами.
+- Легкое добавление новых наблюдателей.
+
+**Минусы:**
+- Сложно отследить всех подписчиков.
+- Массовое уведомление может снизить производительность.
+
+**Когда применять:**
+- Когда один объект должен уведомлять множество других о своих изменениях.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+interface Observer {
+    void update(String message);
+}
+
+@Slf4j
+class ConcreteObserver implements Observer {
+    private String name;
+
+    public ConcreteObserver(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public void update(String message) {
+        log.info("Observer {} получил сообщение: {}", name, message);
+    }
+}
+
+@Slf4j
+class Subject {
+    private List<Observer> observers = new ArrayList<>();
+
+    public void addObserver(Observer observer) {
+        observers.add(observer);
+    }
+
+    public void notifyObservers(String message) {
+        for (Observer observer : observers) {
+            observer.update(message);
+        }
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Subject subject = new Subject();
+        subject.addObserver(new ConcreteObserver("A"));
+        subject.addObserver(new ConcreteObserver("B"));
+
+        subject.notifyObservers("Событие произошло");
+    }
+}
+```
+
+---
+
+## 5. Strategy (Стратегия)
+**Описание:** Стратегия позволяет менять алгоритм или поведение объекта во время выполнения. Основная идея — вынести алгоритмы в отдельные классы и использовать их через общий интерфейс, что обеспечивает гибкость и слабую связку.
+
+**Плюсы:**
+- Легкая замена алгоритмов.
+- Слабая связка между контекстом и стратегиями.
+
+**Минусы:**
+- Увеличение количества классов.
+
+**Когда применять:**
+- Когда требуется менять поведение объекта во время выполнения.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+interface PaymentStrategy {
+    void pay(int amount);
+}
+
+@Slf4j
+class CreditCardPayment implements PaymentStrategy {
+    @Override
+    public void pay(int amount) {
+        log.info("Оплата {} кредитной картой", amount);
+    }
+}
+
+@Slf4j
+class PayPalPayment implements PaymentStrategy {
+    @Override
+    public void pay(int amount) {
+        log.info("Оплата {} через PayPal", amount);
+    }
+}
+
+@Slf4j
+class ShoppingCart {
+    private PaymentStrategy strategy;
+
+    public void setPaymentStrategy(PaymentStrategy strategy) {
+        this.strategy = strategy;
+    }
+
+    public void checkout(int amount) {
+        strategy.pay(amount); // делегирование оплаты выбранной стратегии
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        ShoppingCart cart = new ShoppingCart();
+        cart.setPaymentStrategy(new CreditCardPayment());
+        cart.checkout(500);
+
+        cart.setPaymentStrategy(new PayPalPayment());
+        cart.checkout(1000);
+    }
+}
+
+---
+
+## 6. Command (Команда)
+**Описание:** Паттерн Команда инкапсулирует запрос как объект, позволяя параметризовать объекты действиями, ставить их в очередь или журналировать. Он отделяет отправителя запроса от объекта, который выполняет действие. Такой подход облегчает реализацию отмены и повтора операций, а также поддержку макросов. Паттерн обеспечивает гибкость и расширяемость системы, позволяя легко добавлять новые команды без изменения существующих классов. Команды могут быть сохранены и выполнены позже, что делает их удобными для отложенных действий.
+
+**Плюсы:**
+- Инкапсуляция действий.
+- Возможность реализовать отмену и повтор операций.
+- Упрощает поддержку макросов и отложенного выполнения.
+
+**Минусы:**
+- Увеличение числа классов.
+- Может усложнить структуру проекта при большом количестве команд.
+
+**Когда применять:**
+- Когда нужно параметризовать объекты действиями.
+- Когда требуется сохранять, журналировать или откатывать действия.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+// Интерфейс команды с методом execute
+@Slf4j
+interface Command {
+    void execute();
+}
+
+// Класс устройства, на котором выполняются команды
+@Slf4j
+class Light {
+    public void turnOn() {
+        log.info("Свет включен");
+    }
+
+    public void turnOff() {
+        log.info("Свет выключен");
+    }
+}
+
+// Конкретная команда включения света
+@Slf4j
+class TurnOnCommand implements Command {
+    private Light light;
+
+    public TurnOnCommand(Light light) {
+        this.light = light;
+    }
+
+    @Override
+    public void execute() {
+        light.turnOn(); // делегируем действие устройству
+    }
+}
+
+// Пульт управления, который вызывает команды
+@Slf4j
+class RemoteControl {
+    private Command command;
+
+    public void setCommand(Command command) {
+        this.command = command;
+    }
+
+    public void pressButton() {
+        command.execute(); // выполняем команду
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Light light = new Light();
+        Command turnOn = new TurnOnCommand(light);
+        RemoteControl remote = new RemoteControl();
+        remote.setCommand(turnOn);
+        remote.pressButton(); // включение света через команду
+    }
+}
+```
+
+---
+
+## 7. State (Состояние)
+**Описание:** Паттерн Состояние позволяет объекту изменять поведение при изменении его внутреннего состояния. Каждый объект состояния инкапсулирует определённое поведение, что заменяет громоздкие конструкции if/else или switch. Паттерн повышает читаемость и расширяемость кода. Объект делегирует выполнение методов своему текущему состоянию, что делает систему более гибкой. Легко добавлять новые состояния без изменения существующих классов.
+
+**Плюсы:**
+- Упрощает код с множеством условий.
+- Легко добавлять новые состояния.
+- Повышает читаемость и поддержку.
+
+**Минусы:**
+- Увеличение числа классов.
+- Сложнее отследить все состояния в больших системах.
+
+**Когда применять:**
+- Когда поведение объекта зависит от его состояния.
+- Когда необходимо легко расширять систему новыми состояниями.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+// Интерфейс состояния
+@Slf4j
+interface State {
+    void handle();
+}
+
+// Конкретное состояние включенного устройства
+@Slf4j
+class OnState implements State {
+    @Override
+    public void handle() {
+        log.info("Состояние ON: устройство работает");
+    }
+}
+
+// Конкретное состояние выключенного устройства
+@Slf4j
+class OffState implements State {
+    @Override
+    public void handle() {
+        log.info("Состояние OFF: устройство выключено");
+    }
+}
+
+// Контекст, который меняет состояния
+@Slf4j
+class Device {
+    private State state;
+
+    public void setState(State state) {
+        this.state = state; // изменение текущего состояния
+    }
+
+    public void request() {
+        state.handle(); // делегирование поведения текущему состоянию
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Device device = new Device();
+        device.setState(new OnState());
+        device.request(); // устройство работает
+        device.setState(new OffState());
+        device.request(); // устройство выключено
+    }
+}
+```
+
+---
+
+## 8. Visitor (Посетитель)
+**Описание:** Паттерн Visitor позволяет добавлять новые операции для группы объектов, не изменяя их классы. Он отделяет алгоритмы от объектов, над которыми эти алгоритмы выполняются. Это особенно полезно для сложных иерархий, где часто добавляются новые операции. Паттерн делает код более открытым к расширению и закрытым к модификации. Он упрощает поддержку и тестирование различных операций.
+
+**Плюсы:**
+- Легко добавлять новые операции.
+- Подходит для сложных структур объектов.
+- Снижает связность между классами элементов и операциями.
+
+**Минусы:**
+- Трудно добавлять новые типы элементов.
+- Требуется строгая структура иерархии.
+
+**Когда применять:**
+- Когда нужно выполнять разные операции над объектами сложной структуры.
+- Когда операции часто меняются или добавляются.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+// Интерфейс посетителя
+@Slf4j
+interface Visitor {
+    void visit(Book book);
+    void visit(CD cd);
+}
+
+// Конкретный посетитель для вывода цены
+@Slf4j
+class PriceVisitor implements Visitor {
+    @Override
+    public void visit(Book book) {
+        log.info("Цена книги: {}", book.getPrice());
+    }
+
+    @Override
+    public void visit(CD cd) {
+        log.info("Цена CD: {}", cd.getPrice());
+    }
+}
+
+// Элемент структуры
+@Slf4j
+interface Item {
+    void accept(Visitor visitor);
+}
+
+// Конкретные элементы
+@Slf4j
+class Book implements Item {
+    private int price;
+
+    public Book(int price) {
+        this.price = price;
+    }
+
+    public int getPrice() {
+        return price;
+    }
+
+    @Override
+    public void accept(Visitor visitor) {
+        visitor.visit(this);
+    }
+}
+
+@Slf4j
+class CD implements Item {
+    private int price;
+
+    public CD(int price) {
+        this.price = price;
+    }
+
+    public int getPrice() {
+        return price;
+    }
+
+    @Override
+    public void accept(Visitor visitor) {
+        visitor.visit(this);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Item[] items = {new Book(100), new CD(200)};
+        Visitor visitor = new PriceVisitor();
+        for (Item item : items) {
+            item.accept(visitor);
+        }
+    }
+}
+```
+
+---
+
+## 9. Interpreter (Интерпретатор)
+**Описание:** Паттерн Интерпретатор определяет грамматику простого языка и интерпретирует предложения этого языка. Он позволяет создавать интерпретаторы для специализированных языков и выражений. Паттерн упрощает анализ и обработку выражений, делая код более структурированным. Легко расширять новые правила и синтаксис. Особенно полезен для вычисления, проверки и интерпретации формул или DSL.
+
+**Плюсы:**
+- Легко расширять синтаксис и правила.
+- Четкая структура грамматики.
+
+**Минусы:**
+- Сложность поддержки для сложного языка.
+- Может создавать много небольших классов.
+
+**Когда применять:**
+- Для интерпретации выражений специализированного языка.
+- Для построения компиляторов, парсеров или простых DSL.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+
+// Интерфейс выражения
+@Slf4j
+interface Expression {
+    boolean interpret(String context);
+}
+
+// Конкретное терминальное выражение
+@Slf4j
+class TerminalExpression implements Expression {
+    private String data;
+
+    public TerminalExpression(String data) {
+        this.data = data;
+    }
+
+    @Override
+    public boolean interpret(String context) {
+        return context.contains(data);
+    }
+}
+
+// Операция ИЛИ над выражениями
+@Slf4j
+class OrExpression implements Expression {
+    private Expression expr1;
+    private Expression expr2;
+
+    public OrExpression(Expression expr1, Expression expr2) {
+        this.expr1 = expr1;
+        this.expr2 = expr2;
+    }
+
+    @Override
+    public boolean interpret(String context) {
+        return expr1.interpret(context) || expr2.interpret(context);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Expression expr1 = new TerminalExpression("Java");
+        Expression expr2 = new TerminalExpression("Python");
+        Expression orExpression = new OrExpression(expr1, expr2);
+
+        log.info("Результат интерпретации: {}", orExpression.interpret("Java"));
+    }
+}
+```
+
+---
+
+## 10. Iterator (Итератор)
+**Описание:** Итератор позволяет последовательно обходить элементы коллекции, не раскрывая её внутреннюю структуру. Паттерн предоставляет единый интерфейс для обхода разных типов коллекций. Он делает код обхода универсальным и повторно используемым. Позволяет реализовать несколько способов обхода для одной коллекции. Упрощает работу с комплексными структурами данных.
+
+**Плюсы:**
+- Универсальный способ обхода.
+- Слабая связка между коллекцией и обходом.
+
+**Минусы:**
+- Дополнительные объекты-итераторы.
+- Могут усложнить код при очень больших коллекциях.
+
+**Когда применять:**
+- Когда требуется последовательный доступ к элементам коллекции.
+- Когда нужно скрыть внутреннюю структуру коллекции.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Iterator;
+
+@Slf4j
+public class Main {
+    public static void main(String[] args) {
+        List<String> list = new ArrayList<>();
+        list.add("A");
+        list.add("B");
+        list.add("C");
+
+       
+
+---
+
+## 10. Iterator (Итератор)
+**Описание:** Итератор позволяет последовательно обходить элементы коллекции, не раскрывая её внутреннюю структуру. Он предоставляет единый интерфейс обхода для различных типов коллекций. Это упрощает работу с комплексными структурами данных и делает код более универсальным и повторно используемым. Паттерн поддерживает несколько способов обхода одной коллекции. Он также позволяет безопасно перебирать элементы, не зависимо от внутренней реализации коллекции.
+
+**Плюсы:**
+- Универсальный способ обхода элементов.
+- Слабая связка между коллекцией и обходом.
+- Возможность реализовать разные стратегии обхода.
+
+**Минусы:**
+- Дополнительные объекты-итераторы.
+- Может увеличивать использование памяти при больших коллекциях.
+
+**Когда применять:**
+- Когда требуется последовательный доступ к элементам коллекции.
+- Когда нужно скрыть внутреннюю структуру коллекции.
+
+```java
+import lombok.extern.slf4j.Slf4j;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
+@Slf4j
+public class Main {
+    public static void main(String[] args) {
+        // Создаем коллекцию элементов
+        List<String> list = new ArrayList<>();
+        list.add("A");
+        list.add("B");
+        list.add("C");
+
+        // Получаем итератор для обхода коллекции
+        Iterator<String> iterator = list.iterator();
+
+        // Проходим по всем элементам, не зная внутренней структуры коллекции
+        while (iterator.hasNext()) {
+            String item = iterator.next();
+            log.info("Элемент коллекции: {}", item); // выводим текущий элемент
+        }
+    }
+}
+```
+
+---
+
+## 11. Memento (Хранитель)
+**Описание:** Memento позволяет сохранять и восстанавливать прошлое состояние объекта, не нарушая инкапсуляцию. Это полезно для реализации undo/redo и отката изменений. Хранитель отделяет состояние объекта от его поведения, обеспечивая сохранение истории изменений без вмешательства в код объекта. Паттерн повышает гибкость системы, позволяя легко восстанавливать прежние состояния. Он также упрощает тестирование и откат ошибок в сложных объектах.
+
+**Плюсы:**
+- Сохраняет инкапсуляцию объекта.
+- Позволяет реализовать undo/redo и откат состояний.
+- Упрощает тестирование и управление сложными объектами.
+
+**Минусы:**
+- Может потреблять много памяти при частом сохранении состояний.
+- Требует дополнительного кода для управления хранителями.
+
+**Когда применять:**
+- Когда необходимо сохранять и восстанавливать состояния объектов.
+- При реализации undo/redo и сохранении истории изменений.
+
+```java
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+
+// Хранитель, содержащий состояние
+@Slf4j
+@Getter
+class Memento {
+    private final String state;
+
+    public Memento(String state) {
+        this.state = state;
+    }
+}
+
+// Объект, состояние которого нужно сохранять
+@Slf4j
+class Originator {
+    @Setter
+    private String state;
+
+    // Сохраняем текущее состояние
+    public Memento save() {
+        log.info("Сохраняем состояние: {}", state);
+        return new Memento(state);
+    }
+
+    // Восстанавливаем предыдущее состояние
+    public void restore(Memento memento) {
+        state = memento.getState();
+        log.info("Восстановлено состояние: {}", state);
+    }
+}
+
+@Slf4j
+public class Main {
+    public static void main(String[] args) {
+        Originator originator = new Originator();
+        originator.setState("Состояние1");
+        Memento saved = originator.save(); // сохраняем текущее состояние
+
+        originator.setState("Состояние2");
+        log.info("Текущее состояние изменилось: {}", originator.getState());
+
+        originator.restore(saved); // откат к предыдущему состоянию
+    }
+}
+
 
 
 
