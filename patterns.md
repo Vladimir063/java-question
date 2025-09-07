@@ -148,1816 +148,2026 @@ __Dependency Injection (внедрение зависимости)__ - это н
 Ниже — подробные объяснения (простым языком), реальные сценарии и готовые Java-примеры с подробными комментариями на русском. После каждого блока — полностью рабочий пример в одном файле (один public класс + вспомогательные), чтобы вы могли скопировать и вставить в IDE.
 
 ---
+# Абстрактная фабрика (Abstract Factory)
 
-# 1. Фабрика (Simple Factory) и Фабричный метод (Factory Method)
-### Идея (простыми словами)
-- **Simple Factory** — это просто класс/метод, который создаёт объекты разных типов по входным параметрам. Неофициальный паттерн (не в GOF), но часто используется.
-- **Factory Method** — переопределяемый метод (обычно в абстрактном классе или интерфейсе), который делегирует создание конкретных объектов подклассам. Это официальный GOF-паттерн.
+Абстрактная фабрика — это порождающий паттерн проектирования, который позволяет создавать семейства связанных объектов, не привязываясь к конкретным классам. Основная идея паттерна заключается в том, чтобы клиентский код мог работать с наборами продуктов, которые логически связаны между собой, через общие интерфейсы. Таким образом, можно легко изменять семейства продуктов (например, мебель разных стилей или элементы UI для разных ОС), не меняя сам клиентский код.
 
-### Когда и зачем использовать
-- Нужна централизованная логика создания объектов (когда создание — не тривиально).
-- Когда нужно скрыть конкретные классы от клиента (инверсия зависимостей).
-- Когда требуется расширяемость: добавление нового продукта не должно ломать код клиента.
-- Simple Factory — подходит для небольших случаев; Factory Method — при потребности в расширяемости через наследование.
+Паттерн особенно полезен в ситуациях, когда необходимо обеспечить совместимость создаваемых объектов. Например, нельзя допустить, чтобы программа создавала кнопку в стиле Windows и чекбокс в стиле macOS в одном интерфейсе. Поэтому фабрика всегда возвращает продукты одной и той же вариации.
 
-### Плюсы / минусы
-+ Снижает связанность кода (client не знает конкретных классов).  
-+ Упрощает замену/добавление новых типов.  
-− Может привести к большому числу классов (особенно Factory Method).  
-− Simple Factory может стать «God class», если он слишком большой.
+## Структура
 
-### Пример: Factory Method — транспорт (road/ship/air)
+Структура паттерна состоит из:
+
+* **Абстрактных продуктов** (например, `Button`, `Checkbox`), которые определяют общий интерфейс для всех вариаций.
+* **Конкретных продуктов** (`WinButton`, `MacButton`, и т. д.), которые реализуют эти интерфейсы.
+* **Абстрактной фабрики** (`GUIFactory`), объявляющей методы для создания продуктов.
+* **Конкретных фабрик** (`WinFactory`, `MacFactory`), которые создают продукты конкретных вариаций.
+* **Клиентского кода** (`Application`), который работает только с интерфейсами и не зависит от конкретных реализаций.
+
+## Пример на Java
+
 ```java
-// FactoryMethodDemo.java
-// Простой демонстрационный пример паттерна Factory Method.
-// Все классы находятся в одном файле для удобства копирования в IDE.
-// Public-класс соответствует имени файла.
-
-// Добавлены аннотации Lombok для демонстрации их использования (хотя в простых классах Lombok не обязателен).
-import lombok.NoArgsConstructor;
-import lombok.ToString;
-
-public class FactoryMethodDemo {
-    public static void main(String[] args) {
-        // Клиент работает с создателем, не зная конкретного транспорта.
-        Creator roadCreator = new RoadLogistics();
-        Transport t1 = roadCreator.createTransport();
-        t1.deliver();
-
-        Creator seaCreator = new SeaLogistics();
-        Transport t2 = seaCreator.createTransport();
-        t2.deliver();
-
-        // Добавление нового транспорта = добавление нового класса Creator + Product,
-        // клиентский код не изменяется.
-    }
-}
-
-// --- Product интерфейс ---
-interface Transport {
-    void deliver(); // метод для доставки
-}
-
-// --- Concrete Products ---
-@NoArgsConstructor
-@ToString
-class Truck implements Transport {
-    @Override
-    public void deliver() {
-        // Конкретная реализация доставки для грузовика
-        System.out.println("Доставка грузовиком по дороге");
-    }
-}
-
-@NoArgsConstructor
-@ToString
-class Ship implements Transport {
-    @Override
-    public void deliver() {
-        System.out.println("Доставка кораблем по морю");
-    }
-}
-
-// --- Creator (абстрактный) ---
-abstract class Creator {
-    // Фабричный метод — возвращает интерфейс Transport.
-    // Подклассы решают, какой конкретно транспорт создать.
-    public abstract Transport createTransport();
-
-    // Допустим у Creator есть общая логика:
-    public void planDelivery() {
-        Transport transport = createTransport();
-        // общая логика использования продукта
-        System.out.println("Планирование доставки...");
-        transport.deliver();
-    }
-}
-
-// --- Concrete Creators ---
-@NoArgsConstructor
-class RoadLogistics extends Creator {
-    @Override
-    public Transport createTransport() {
-        // можно добавить логику выбора конфигурации Truck
-        return new Truck();
-    }
-}
-
-@NoArgsConstructor
-class SeaLogistics extends Creator {
-    @Override
-    public Transport createTransport() {
-        return new Ship();
-    }
-}
-```
-
----
-
-# 2. Абстрактная фабрика (Abstract Factory)
-### Идея (простыми словами)
-Абстрактная фабрика предоставляет интерфейс для создания **семейств связанных объектов** (например, виджеты для разных платформ), не указывая их конкретных классов. Это удобно, когда объекты должны работать вместе (совместимы по интерфейсу/стилю).
-
-### Когда и зачем использовать
-- Когда нужно создать семейства взаимосвязанных объектов (например, темы UI — кнопка + чекбокс + поле ввода).
-- Когда важно, чтобы продукты одного семейства были совместимы.
-- Когда нужно менять семейство продуктов во время выполнения (поддержка тем/платформ).
-
-### Плюсы / минусы
-+ Хорошо обеспечивает единообразие продуктов (семейства совместимы).  
-+ Упрощает замену семейства продуктов целиком.  
-− Усложняет добавление новых типов продуктов (добавая новый продукт — нужно изменить интерфейсы/все фабрики).
-
-### Пример: семейства виджетов (Windows / Mac)
-```java
-// AbstractFactoryDemo.java
-// Демонстрация Abstract Factory на примере UI-виджетов (Button + Checkbox).
-// Все классы в одном файле для удобного копирования.
-
-// Добавлены аннотации Lombok (@ToString) для демонстрации, где это уместно.
-import lombok.ToString;
-
-public class AbstractFactoryDemo {
-    public static void main(String[] args) {
-        UIFactory factory = new WindowsFactory();
-        Button winButton = factory.createButton();
-        Checkbox winCheckbox = factory.createCheckbox();
-        winButton.paint();
-        winCheckbox.paint();
-
-        // Теперь сменим семью на Mac
-        UIFactory macFactory = new MacFactory();
-        macFactory.createButton().paint();
-        macFactory.createCheckbox().paint();
-    }
-}
-
-// --- Abstract Products ---
+// Этот паттерн предполагает, что у вас есть несколько семейств
+// продуктов, находящихся в отдельных иерархиях классов
+// (Button/Checkbox). Продукты одного семейства должны иметь
+// общий интерфейс.
 interface Button {
     void paint();
+}
+
+// Семейства продуктов имеют те же вариации (macOS/Windows).
+class WinButton implements Button {
+    @Override
+    public void paint() {
+        // Отрисовать кнопку в стиле Windows.
+        System.out.println("Rendering a Windows style button.");
+    }
+}
+
+class MacButton implements Button {
+    @Override
+    public void paint() {
+        // Отрисовать кнопку в стиле macOS.
+        System.out.println("Rendering a MacOS style button.");
+    }
 }
 
 interface Checkbox {
     void paint();
 }
 
-// --- Concrete Products for Windows ---
-@ToString
-class WindowsButton implements Button {
+class WinCheckbox implements Checkbox {
     @Override
     public void paint() {
-        System.out.println("Рисуем кнопку в стиле Windows");
+        // Отрисовать чекбокс в стиле Windows.
+        System.out.println("Rendering a Windows style checkbox.");
     }
 }
 
-@ToString
-class WindowsCheckbox implements Checkbox {
-    @Override
-    public void paint() {
-        System.out.println("Рисуем чекбокс в стиле Windows");
-    }
-}
-
-// --- Concrete Products for Mac ---
-@ToString
-class MacButton implements Button {
-    @Override
-    public void paint() {
-        System.out.println("Рисуем кнопку в стиле Mac");
-    }
-}
-
-@ToString
 class MacCheckbox implements Checkbox {
     @Override
     public void paint() {
-        System.out.println("Рисуем чекбокс в стиле Mac");
+        // Отрисовать чекбокс в стиле macOS.
+        System.out.println("Rendering a MacOS style checkbox.");
     }
 }
 
-// --- Abstract Factory ---
-interface UIFactory {
+// Абстрактная фабрика знает обо всех абстрактных типах продуктов.
+interface GUIFactory {
     Button createButton();
     Checkbox createCheckbox();
 }
 
-// --- Concrete Factories ---
-class WindowsFactory implements UIFactory {
+// Каждая конкретная фабрика знает и создаёт только продукты своей вариации.
+class WinFactory implements GUIFactory {
     @Override
-    public Button createButton() { return new WindowsButton(); }
+    public Button createButton() {
+        return new WinButton();
+    }
+
     @Override
-    public Checkbox createCheckbox() { return new WindowsCheckbox(); }
+    public Checkbox createCheckbox() {
+        return new WinCheckbox();
+    }
 }
 
-class MacFactory implements UIFactory {
+class MacFactory implements GUIFactory {
     @Override
-    public Button createButton() { return new MacButton(); }
+    public Button createButton() {
+        return new MacButton();
+    }
+
     @Override
-    public Checkbox createCheckbox() { return new MacCheckbox(); }
+    public Checkbox createCheckbox() {
+        return new MacCheckbox();
+    }
 }
-```
 
----
+// Для кода, использующего фабрику, не важно, с какой конкретно фабрикой он работает.
+// Все получатели продуктов работают с ними через общие интерфейсы.
+class Application {
+    private GUIFactory factory;
+    private Button button;
 
-# 3. Builder (Строитель)
-### Идея (простыми словами)
-Builder отделяет процесс построения сложного объекта от его представления. Особенно полезен, когда конструктор класса принимает много параметров (особенно опциональных), и хочется избежать "конструкторского ада" (много конструкторов с разными комбинациями параметров).
+    public Application(GUIFactory factory) {
+        this.factory = factory;
+    }
 
-### Когда и зачем использовать
-- Объект имеет много полей (часто опциональных).
-- Нужна читабельная и безопасная конструкция (иммутабельность).
-- Требуется пошаговая конфигурация и валидация перед созданием.
-- Полезен в DSL-подходе (цепочки вызовов).
+    public void createUI() {
+        this.button = factory.createButton();
+    }
 
-### Плюсы / минусы
-+ Улучшает читаемость кода при создании сложных объектов.  
-+ Позволяет делать объект immutable.  
-− Небольшой дополнительный код (класс Builder), но обычно оправдан.
+    public void paint() {
+        button.paint();
+    }
+}
 
-### Пример: построение объекта `User` с множеством опциональных полей
-```java
-// BuilderDemo.java
-// Пример паттерна Builder на классе User.
-// Внутри статический вложенный Builder: класс User становится иммутабельным.
-
-// Здесь заменяем ручной Builder на Lombok @Builder для сокращения кода.
-// Lombok сгенерирует класс Builder автоматически, а также геттеры и toString.
-import lombok.Builder;
-import lombok.Getter;
-import lombok.ToString;
-
-public class BuilderDemo {
+// Приложение выбирает тип конкретной фабрики и создаёт её
+// динамически, исходя из конфигурации или окружения.
+class ApplicationConfigurator {
     public static void main(String[] args) {
-        // Пример использования билдера.
-        User user = User.builder()
-                .email("ivan@example.com") // обязательное поле
-                .firstName("Иван")
-                .lastName("Иванов")
-                .age(35)
-                .phone("+7-900-123-45-67")
-                .build();
+        String configOS = "Windows"; // имитация чтения из конфигурации
 
-        System.out.println(user);
-    }
-}
-
-@Getter
-@ToString
-@Builder
-final class User {
-    // обязательное
-    private final String email;
-    // опциональные
-    private final String firstName;
-    private final String lastName;
-    private final Integer age;
-    private final String phone;
-}
-```
-
----
-
-# 4. Singleton (Одиночка)
-### Идея (простыми словами)
-Паттерн обеспечивает наличие **только одного экземпляра** класса и глобальную точку доступа к нему.
-
-### Когда и зачем использовать
-- Нужно глобальное, совместно используемое состояние (например, конфигурация приложения, пул соединений, логгер).  
-- Важно, чтобы экземпляр был один в рамках JVM.
-
-### Важно на интервью
-- Обсуждают проблемы многопоточности и сериализации.
-- Покажите разные реализации (eager, lazy с double-check, Enum) и объясните плюсы/минусы.
-
-### Плюсы / минусы
-+ Удобен для глобального состояния.  
-− Может стать глобальной переменной (anti-pattern) — усложняет тестирование (мокирование).  
-− Ошибки при сериализации, клонировании и многопоточности — нужно быть аккуратным.
-
-### Примеры: Eager, Lazy (Double-checked), Enum
-```java
-// SingletonDemo.java
-// Три варианта реализации Singleton — в одном файле для демонстрации.
-// В реальном проекте выберите один подход (часто рекомендуют enum-одиночку).
-
-// Lombok можно использовать для генерации геттеров/логирования, например @Getter или @Slf4j.
-// Здесь добавим @Getter в качестве примера.
-import lombok.Getter;
-
-public class SingletonDemo {
-    public static void main(String[] args) {
-        System.out.println("Eager: " + EagerSingleton.getInstance());
-        System.out.println("LazyDCL: " + LazyDCLSingleton.getInstance());
-        System.out.println("Enum: " + EnumSingleton.INSTANCE);
-
-        // Проверка, что ссылки одинаковы
-        System.out.println("Eager same? " + (EagerSingleton.getInstance() == EagerSingleton.getInstance()));
-        System.out.println("LazyDCL same? " + (LazyDCLSingleton.getInstance() == LazyDCLSingleton.getInstance()));
-        System.out.println("Enum same? " + (EnumSingleton.INSTANCE == EnumSingleton.INSTANCE));
-    }
-}
-
-// --- Eager initialization (простая и потокобезопасная при загрузке класса) ---
-@Getter
-class EagerSingleton {
-    // Экземпляр создаётся при загрузке класса
-    private static final EagerSingleton INSTANCE = new EagerSingleton();
-
-    // Приватный конструктор — нельзя создать извне
-    private EagerSingleton() {}
-
-    public static EagerSingleton getInstance() {
-        return INSTANCE;
-    }
-}
-
-// --- Lazy initialization с double-checked locking (DCL) ---
-@Getter
-class LazyDCLSingleton {
-    // volatile важен для корректности double-checked locking
-    private static volatile LazyDCLSingleton instance;
-
-    private LazyDCLSingleton() {}
-
-    public static LazyDCLSingleton getInstance() {
-        // Сначала без синхронизации (быстрая проверка)
-        if (instance == null) {
-            synchronized (LazyDCLSingleton.class) {
-                // Проверяем ещё раз внутри synchronized
-                if (instance == null) {
-                    instance = new LazyDCLSingleton();
-                }
-            }
+        GUIFactory factory;
+        if (configOS.equals("Windows")) {
+            factory = new WinFactory();
+        } else if (configOS.equals("Mac")) {
+            factory = new MacFactory();
+        } else {
+            throw new RuntimeException("Error! Unknown operating system.");
         }
-        return instance;
-    }
-}
 
-// --- Enum singleton (лучший вариант в большинстве случаев) ---
-enum EnumSingleton {
-    INSTANCE; // единственный экземпляр
-
-    // Можно хранить состояние и методы
-    public void doSomething() {
-        System.out.println("EnumSingleton doing something");
+        Application app = new Application(factory);
+        app.createUI();
+        app.paint();
     }
 }
 ```
 
-**Рекомендация:** в большинстве случаев `enum`-singleton — самый безопасный и простой способ, потому что он автоматически защищён от проблем с сериализацией и отражением (reflection).
+## Преимущества и недостатки
 
----
+**Преимущества:**
 
-# 5. Prototype (Прототип)
-### Идея (простыми словами)
-Prototype — создаём новые объекты путём клонирования (копирования) существующего экземпляра-прототипа. Удобно, когда создание объекта «дорогое» (сложная инициализация), либо когда нужно быстро получить копию с небольшими изменениями.
+* Гарантирует сочетаемость создаваемых продуктов.
+* Избавляет клиентский код от привязки к конкретным классам.
+* Выделяет код производства продуктов в одно место, упрощая поддержку.
+* Упрощает добавление новых продуктов.
+* Реализует принцип открытости/закрытости.
 
-### Когда и зачем использовать
-- Стоимость создания нового объекта высокая (ресурсоёмкая инициализация).
-- Нужно много схожих объектов, которые отличаются небольшими деталями.
-- Желание получать копии без знания точного конкретного класса (через интерфейс clone).
+**Недостатки:**
 
-### Важные нюансы в Java
-- `Cloneable` и метод `clone()` — исторически спорны (поведение дефолтного `Object.clone()` делает поверхностное копирование).
-- Для глубокого копирования часто нужно вручную клонировать вложенные объекты или использовать сериализацию/копирующие конструкторы.
-- На интервью можно показать и `clone()` и альтернативный способ — копирующий конструктор/фабрика копий.
+* Усложняет код из-за введения множества дополнительных классов.
+* Требует наличия всех типов продуктов в каждой вариации.
 
-### Пример: shallow & deep clone
+# Строитель
+Строитель — это порождающий паттерн проектирования, который позволяет создавать сложные объекты пошагово. Строитель даёт возможность использовать один и тот же код строительства для получения разных представлений объектов.
+Паттерн предлагает разбить процесс конструирования объекта на отдельные шаги (например, построитьСтены, вставитьДвери и другие). Чтобы создать объект, вам нужно поочерёдно вызывать методы строителя. Причём не нужно запускать все шаги, а только те, что нужны для производства объекта определённой конфигурации.
+Например, один строитель делает стены из дерева и стекла, другой из камня и железа, третий из золота и бриллиантов. Вызвав одни и те же шаги строительства, в первом случае вы получите обычный жилой дом, во втором — маленькую крепость, а в третьем — роскошное жилище. Замечу, что код, который вызывает шаги строительства, должен работать со строителями через общий интерфейс, чтобы их можно было свободно взаимозаменять.
+
+# Фабричный метод
+Фабричный метод — это порождающий паттерн проектирования, который определяет общий интерфейс для создания объектов в суперклассе, позволяя подклассам изменять тип создаваемых объектов.
+Представьте, что вы создаёте программу управления грузовыми перевозками. Сперва вы рассчитываете перевозить товары только на автомобилях. Поэтому весь ваш код работает с объектами класса Грузовик.
+
+В какой-то момент ваша программа становится настолько известной, что морские перевозчики выстраиваются в очередь и просят добавить поддержку морской логистики в программу. 
+Отличные новости, правда?! Но как насчёт кода? Большая часть существующего кода жёстко привязана к классам Грузовиков. Чтобы добавить в программу классы морских Судов, понадобится перелопатить всю программу. Более того, если вы потом решите добавить в программу ещё один вид транспорта, то всю эту работу придётся повторить.
+
+В итоге вы получите ужасающий код, наполненный условными операторами, которые выполняют то или иное действие, в зависимости от класса транспорта.
+
+ Решение
+Паттерн Фабричный метод предлагает создавать объекты не напрямую, используя оператор new, а через вызов особого фабричного метода. Не пугайтесь, объекты всё равно будут создаваться при помощи new, но делать это будет фабричный метод. На первый взгляд, это может показаться бессмысленным: мы просто переместили вызов конструктора из одного конца программы в другой. Но теперь вы сможете переопределить фабричный метод в подклассе, чтобы изменить тип создаваемого продукта.
+
+Чтобы эта система заработала, все возвращаемые объекты должны иметь общий интерфейс. Подклассы смогут производить объекты различных классов, следующих одному и тому же интерфейсу.
+
+## Пример
+
 ```java
-// PrototypeDemo.java
-// Демонстрация shallow и deep clone на объекте Document, содержащем Metadata.
-// Используем Cloneable для примера, и также покажем копирующий конструктор для deep copy.
-
-// Lombok используется для сокращения шаблонного кода (геттеры/сеттеры/toString)
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-
-public class PrototypeDemo {
-    public static void main(String[] args) throws CloneNotSupportedException {
-        Metadata meta = new Metadata("Иван", "2025-09-06");
-        Document original = new Document("Отчёт", "Тело отчёта", meta);
-
-        // shallow clone (через clone) — metadata будет общим (shared reference)
-        Document shallow = original.clone();
-        System.out.println("original metadata author: " + original.getMetadata().getAuthor());
-        System.out.println("shallow metadata author:  " + shallow.getMetadata().getAuthor());
-
-        // Изменим метаданные в shallow
-        shallow.getMetadata().setAuthor("Пётр");
-        System.out.println("После изменения shallow:");
-        System.out.println("original metadata author: " + original.getMetadata().getAuthor()); // изменилось — демонстрация shallow
-
-        // Deep clone через копирующий конструктор
-        Document deep = new Document(original); // copy constructor
-        deep.getMetadata().setAuthor("Мария");
-        System.out.println("После изменения deep:");
-        System.out.println("original metadata author: " + original.getMetadata().getAuthor()); // не изменилось
-    }
+// Паттерн Фабричный метод применим тогда, когда в программе
+// есть иерархия классов продуктов.
+interface Button {
+    void render();
+    void onClick(String f);
 }
 
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-class Metadata implements Cloneable {
-    private String author;
-    private String date;
+class WindowsButton implements Button {
+    @Override
+    public void render() {
+        // Отрисовать кнопку в стиле Windows.
+    }
 
     @Override
-    protected Metadata clone() throws CloneNotSupportedException {
-        // Для метаданных shallow clone достаточно (если все поля примитивы/immutable).
-        return (Metadata) super.clone();
+    public void onClick(String f) {
+        // Навесить на кнопку обработчик событий Windows.
     }
 }
 
-@Data
-class Document implements Cloneable {
-    private String title;
-    private String body;
-    private Metadata metadata;
-
-    public Document(String title, String body, Metadata metadata) {
-        this.title = title;
-        this.body = body;
-        this.metadata = metadata;
+class HTMLButton implements Button {
+    @Override
+    public void render() {
+        // Вернуть HTML-код кнопки.
     }
 
-    // Копирующий конструктор для deep copy
-    public Document(Document other) {
-        this.title = other.title;
-        this.body = other.body;
-        // Для глубокого копирования создаём новый объект Metadata (который клонируем)
-        try {
-            this.metadata = other.metadata.clone();
-        } catch (CloneNotSupportedException e) {
-            // fallback — создать вручную
-            this.metadata = new Metadata(other.metadata.getAuthor(), other.metadata.getDate());
+    @Override
+    public void onClick(String f) {
+        // Навесить на кнопку обработчик события браузера.
+    }
+}
+
+// Базовый класс фабрики. Заметьте, что «фабрика» — это всего
+// лишь дополнительная роль для класса. Скорее всего, он уже
+// имеет какую-то бизнес-логику, в которой требуется создание
+// разнообразных продуктов.
+abstract class Dialog {
+    public void render() {
+        // Чтобы использовать фабричный метод, вы должны
+        // убедиться в том, что эта бизнес-логика не зависит от
+        // конкретных классов продуктов. Button — это общий
+        // интерфейс кнопок, поэтому все хорошо.
+        Button okButton = createButton();
+        okButton.onClick("closeDialog");
+        okButton.render();
+    }
+
+    // Мы выносим весь код создания продуктов в особый метод,
+    // который называют «фабричным».
+    public abstract Button createButton();
+}
+
+// Конкретные фабрики переопределяют фабричный метод и
+// возвращают из него собственные продукты.
+class WindowsDialog extends Dialog {
+    @Override
+    public Button createButton() {
+        return new WindowsButton();
+    }
+}
+
+class WebDialog extends Dialog {
+    @Override
+    public Button createButton() {
+        return new HTMLButton();
+    }
+}
+
+class Application {
+    private Dialog dialog;
+
+    // Приложение создаёт определённую фабрику в зависимости от
+    // конфигурации или окружения.
+    public void initialize() {
+        String config = "Windows"; // имитация чтения конфигурации
+
+        if (config.equals("Windows")) {
+            dialog = new WindowsDialog();
+        } else if (config.equals("Web")) {
+            dialog = new WebDialog();
+        } else {
+            throw new RuntimeException("Error! Unknown operating system.");
         }
     }
 
-    @Override
-    protected Document clone() throws CloneNotSupportedException {
-        // По умолчанию суперкласс делает поверхностное копирование
-        return (Document) super.clone();
+    // Если весь остальной клиентский код работает с фабриками и
+    // продуктами только через общий интерфейс, то для него
+    // будет не важно, какая фабрика была создана изначально.
+    public void main() {
+        this.initialize();
+        dialog.render();
     }
-
-    // геттер для metadata
-    public Metadata getMetadata() { return metadata; }
 }
 ```
 
-**Практический совет:** на интервью можно сказать, что `Cloneable` в Java спорен, и предпочитаете контролируемое копирование (копирующие конструкторы / фабрики), особенно для глубокого копирования.
 
----
+## Применимость
 
-# Заключение — как выбирать паттерн
-- Нужен один глобальный экземпляр → **Singleton** (с осторожностью; лучше enum).
-- Нужна простая централизация создания → **Simple Factory**.
-- Требуется расширяемость создания через подклассы → **Factory Method**.
-- Нужна гибкая смена семейства совместимых продуктов → **Abstract Factory**.
-- Объект создаётся с большим количеством опций / хотите immutable → **Builder**.
-- Нужно клонирование/быстро создавать похожие объекты / избежать дорогой инициализации → **Prototype** (предпочтительно через контролируемые копии).
+* Когда заранее неизвестны типы и зависимости объектов, с которыми должен работать ваш код.
+* Когда вы хотите отделить код производства продуктов от остального кода, который эти продукты использует.
+* Когда вы хотите дать возможность пользователям расширять части вашего фреймворка или библиотеки.
 
----
+## Преимущества
 
-# Структурные паттерны проектирования (с подробным объяснением и примерами на Java + Lombok)
+* Избавляет код от привязки к конкретным классам продуктов.
+* Упрощает расширение кода, позволяя добавлять новые продукты без изменения существующего.
+* Реализует принцип открытости/закрытости.
 
-Структурные паттерны помогают **организовать классы и объекты в более крупные структуры**, сохраняя при этом гибкость.  
-Они фокусируются на том, **как связать классы и объекты между собой**.
+## Недостатки
 
----
+* Может привести к появлению большого количества дополнительных классов.
+* Усложняет код из-за необходимости создания иерархии фабрик.
 
-# 1. Adapter (Адаптер)
-### Идея (простыми словами)
-Адаптер позволяет двум несовместимым интерфейсам работать вместе. Он оборачивает один объект и предоставляет интерфейс, ожидаемый клиентом. Это особенно полезно, когда нужно использовать существующие классы без изменения их кода. Паттерн помогает интегрировать старый код с новым. Он скрывает детали преобразования интерфейсов от клиента.
+# Адаптер (Adapter)
 
-### Когда использовать
-- Есть готовый класс, но его интерфейс не подходит клиентскому коду.
-- Не хочется или нельзя менять существующий класс.
-- Нужно использовать стороннюю библиотеку с неудобным интерфейсом.
+Адаптер — это структурный паттерн проектирования, который позволяет объектам с несовместимыми интерфейсами работать вместе. Его основная идея заключается в том, чтобы создать промежуточный объект — адаптер, который преобразует интерфейс одного объекта в интерфейс, ожидаемый другим.
 
-### Плюсы / минусы
-+ Позволяет переиспользовать существующие классы без изменения их кода.  
-+ Изолирует изменения интерфейсов.  
-− Может привести к избыточному числу классов (каждый адаптер отдельно).  
-− Иногда ухудшает читаемость из-за "лишнего уровня".
+## Проблема
 
-### Пример: `SquarePeg` и `RoundHole`
+Представьте, что вы пишете приложение для торговли на бирже. Оно получает котировки в формате **XML** и строит графики. Но в какой-то момент вы решаете использовать стороннюю библиотеку аналитики, которая принимает данные только в формате **JSON**. Переписывать библиотеку под XML невозможно, и доступ к её исходникам у вас отсутствует.
+
+Чтобы решить эту проблему, мы используем адаптер. Он оборачивает существующий объект и переводит его данные или вызовы в совместимый формат. Клиентский код при этом не узнаёт, что внутри используется несоответствующий сервис.
+
+## Решение
+
+Адаптер выступает «переводчиком» между несовместимыми интерфейсами. Он реализует интерфейс клиента, а внутри использует сервисный объект, трансформируя данные и вызовы так, чтобы они были совместимы. Таким образом, клиентский код работает с адаптером так, словно это обычный объект.
+
+Существует два варианта адаптера:
+
+* **Адаптер объектов** — реализует интерфейс клиента и содержит ссылку на сервис (агрегация).
+* **Адаптер классов** — наследует как интерфейс клиента, так и сервис (возможен только в языках с поддержкой множественного наследования, например, C++).
+
+## Пример на псевдокоде
+
 ```java
-// AdapterDemo.java
-// Пример: у нас есть КруглоеОтверстие (RoundHole) и КруглыйКолышек (RoundPeg).
-// Но появляется КвадратныйКолышек (SquarePeg), который не подходит.
-// Используем адаптер, чтобы заставить квадратный колышек работать с круглым отверстием.
-
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-
-public class AdapterDemo {
-    public static void main(String[] args) {
-        RoundHole hole = new RoundHole(5);
-        RoundPeg roundPeg = new RoundPeg(5);
-        System.out.println("Круглый колышек помещается? " + hole.fits(roundPeg));
-
-        SquarePeg smallSqPeg = new SquarePeg(5);
-        SquarePeg largeSqPeg = new SquarePeg(10);
-
-        // Адаптируем квадратные колышки
-        RoundPeg smallAdapter = new SquarePegAdapter(smallSqPeg);
-        RoundPeg largeAdapter = new SquarePegAdapter(largeSqPeg);
-
-        System.out.println("Маленький квадратный колышек помещается? " + hole.fits(smallAdapter));
-        System.out.println("Большой квадратный колышек помещается? " + hole.fits(largeAdapter));
-    }
-}
-
-@Getter
-@AllArgsConstructor
+// Классы с совместимыми интерфейсами: КруглоеОтверстие и КруглыйКолышек.
 class RoundHole {
     private double radius;
 
+    public RoundHole(double radius) {
+        this.radius = radius;
+    }
+
+    public double getRadius() {
+        // Вернуть радиус отверстия.
+        return radius;
+    }
+
     public boolean fits(RoundPeg peg) {
-        return this.radius >= peg.getRadius();
+        // Проверить, помещается ли колышек в отверстие.
+        return this.getRadius() >= peg.getRadius();
     }
 }
 
-@Getter
-@AllArgsConstructor
 class RoundPeg {
     private double radius;
+
+    public RoundPeg(double radius) {
+        this.radius = radius;
+    }
+
+    public double getRadius() {
+        // Вернуть радиус круглого колышка.
+        return radius;
+    }
 }
 
-@Getter
-@AllArgsConstructor
+// Устаревший, несовместимый класс: КвадратныйКолышек.
 class SquarePeg {
     private double width;
+
+    public SquarePeg(double width) {
+        this.width = width;
+    }
+
+    public double getWidth() {
+        // Вернуть ширину квадратного колышка.
+        return width;
+    }
 }
 
-// Адаптер: заставляет SquarePeg работать как RoundPeg
-@AllArgsConstructor
+// Адаптер позволяет использовать квадратные колышки и круглые отверстия вместе.
 class SquarePegAdapter extends RoundPeg {
     private SquarePeg peg;
 
+    public SquarePegAdapter(SquarePeg peg) {
+        super(0);
+        this.peg = peg;
+    }
+
+    @Override
     public double getRadius() {
-        // Диагональ квадрата / 2 = радиус вписанной окружности
-        return (peg.getWidth() * Math.sqrt(2)) / 2;
+        // Вычислить половину диагонали квадратного колышка по теореме Пифагора.
+        return peg.getWidth() * Math.sqrt(2) / 2;
+    }
+}
+
+// Где-то в клиентском коде.
+RoundHole hole = new RoundHole(5);
+RoundPeg rpeg = new RoundPeg(5);
+hole.fits(rpeg); // TRUE
+
+SquarePeg smallSqpeg = new SquarePeg(5);
+SquarePeg largeSqpeg = new SquarePeg(10);
+// hole.fits(smallSqpeg); // Ошибка компиляции, несовместимые типы
+
+SquarePegAdapter smallSqpegAdapter = new SquarePegAdapter(smallSqpeg);
+SquarePegAdapter largeSqpegAdapter = new SquarePegAdapter(largeSqpeg);
+hole.fits(smallSqpegAdapter); // TRUE
+hole.fits(largeSqpegAdapter); // FALSE
+```
+
+## Применимость
+
+* Когда вы хотите использовать сторонний класс, но его интерфейс не соответствует остальному коду приложения.
+* Когда нужно адаптировать существующие классы без изменения их кода.
+* Когда необходимо использовать несколько подклассов, но в них отсутствует общая функциональность. Вместо дублирования можно вынести её в адаптер.
+
+## Преимущества
+
+* Изолирует и скрывает от клиента сложность преобразований интерфейсов.
+* Позволяет использовать существующие классы без изменения их кода.
+* Поддерживает принцип открытости/закрытости.
+* Делает код более гибким при работе с внешними библиотеками.
+
+## Недостатки
+
+* Усложняет код из-за введения дополнительных классов.
+* Может ухудшить читаемость, если адаптеров слишком много.
+* Иногда снижает производительность из-за лишних преобразований.
+
+# Мост (Bridge)
+
+Мост — это структурный паттерн проектирования, который разделяет один или несколько классов на две отдельные иерархии — **абстракцию** и **реализацию**, позволяя изменять их независимо друг от друга.
+
+## Проблема
+
+Представим, что у нас есть класс `Фигура` с подклассами `Круг` и `Квадрат`. Теперь мы хотим расширить иерархию по цветам, чтобы были «синие фигуры» и «красные фигуры». В итоге появятся комбинации: `СинийКруг`, `КрасныйКвадрат` и т.д. С ростом числа фигур и цветов количество подклассов будет расти в геометрической прогрессии.
+
+Это неудобно и ведёт к раздуванию дерева классов.
+
+## Решение
+
+Паттерн **Мост** предлагает вынести одну из независимых плоскостей (например, Цвет) в отдельную иерархию и связать её с другой (Фигура) через композицию. Таким образом, класс Фигура будет содержать ссылку на объект Цвета. Это и есть «мост» между абстракцией и реализацией.
+
+Теперь можно:
+
+* Добавлять новые цвета без изменения классов фигур.
+* Добавлять новые фигуры без изменения классов цветов.
+
+## Абстракция и Реализация
+
+Термины звучат академично, но всё просто:
+
+* **Абстракция** — слой управления (например, GUI), который делегирует работу реализации.
+* **Реализация** — низкоуровневый слой (например, API ОС).
+
+Абстракции и реализации могут развиваться независимо. Например, можно развивать разные типы GUI и поддерживать разные API ОС. При этом классы не будут мешать друг другу.
+
+## Защита от изменений
+
+Когда код разделён на абстракции и реализации, проще вносить изменения. Мы можем добавлять новые ОС (реализации) или новые виды интерфейсов (абстракции), не трогая уже существующие классы.
+
+## Структура
+
+* **Абстракция** — управляющая логика, делегирует работу реализации.
+* **Реализация** — общий интерфейс, который используют абстракции.
+* **Конкретные реализации** — содержат платформозависимый код.
+* **Расширенные абстракции** — варианты управляющей логики.
+* **Клиент** работает только с абстракцией.
+
+## Псевдокод
+
+```java
+// Класс пультов имеет ссылку на устройство, которым управляет.
+// Методы этого класса делегируют работу методам связанного устройства.
+class Remote {
+    protected Device device;
+
+    public Remote(Device device) {
+        this.device = device;
+    }
+
+    public void togglePower() {
+        if (device.isEnabled()) {
+            device.disable();
+        } else {
+            device.enable();
+        }
+    }
+
+    public void volumeDown() {
+        device.setVolume(device.getVolume() - 10);
+    }
+
+    public void volumeUp() {
+        device.setVolume(device.getVolume() + 10);
+    }
+
+    public void channelDown() {
+        device.setChannel(device.getChannel() - 1);
+    }
+
+    public void channelUp() {
+        device.setChannel(device.getChannel() + 1);
+    }
+}
+
+// Вы можете расширять класс пультов, не трогая код устройств.
+class AdvancedRemote extends Remote {
+    public AdvancedRemote(Device device) {
+        super(device);
+    }
+
+    public void mute() {
+        device.setVolume(0);
+    }
+}
+
+// Все устройства имеют общий интерфейс. Поэтому с ними может работать любой пульт.
+interface Device {
+    boolean isEnabled();
+    void enable();
+    void disable();
+    int getVolume();
+    void setVolume(int percent);
+    int getChannel();
+    void setChannel(int channel);
+}
+
+// Но каждое устройство имеет особую реализацию.
+class Tv implements Device {
+    private boolean on = false;
+    private int volume = 30;
+    private int channel = 1;
+
+    public boolean isEnabled() { return on; }
+    public void enable() { on = true; }
+    public void disable() { on = false; }
+    public int getVolume() { return volume; }
+    public void setVolume(int percent) { volume = percent; }
+    public int getChannel() { return channel; }
+    public void setChannel(int channel) { this.channel = channel; }
+}
+
+class Radio implements Device {
+    private boolean on = false;
+    private int volume = 20;
+    private int channel = 1;
+
+    public boolean isEnabled() { return on; }
+    public void enable() { on = true; }
+    public void disable() { on = false; }
+    public int getVolume() { return volume; }
+    public void setVolume(int percent) { volume = percent; }
+    public int getChannel() { return channel; }
+    public void setChannel(int channel) { this.channel = channel; }
+}
+
+// Где-то в клиентском коде.
+Tv tv = new Tv();
+Remote remote = new Remote(tv);
+remote.togglePower();
+
+Radio radio = new Radio();
+AdvancedRemote advancedRemote = new AdvancedRemote(radio);
+advancedRemote.mute();
+```
+
+## Применимость
+
+* Когда нужно разделить монолитный класс с несколькими реализациями.
+* Когда класс нужно расширять в двух независимых направлениях.
+* Когда реализацию нужно менять во время выполнения программы.
+
+## Преимущества
+
+* Уменьшает количество классов комбинаций.
+* Позволяет изменять абстракцию и реализацию независимо.
+* Упрощает поддержку и расширяемость.
+* Поддерживает принцип единственной ответственности.
+
+## Недостатки
+
+* Усложняет структуру кода за счёт введения дополнительных классов.
+* Увеличивает количество уровней абстракции, что может затруднить отладку.
+
+
+# Паттерн «Декоратор» — кратко и с примером на Java
+
+Ниже — сжатое и упорядоченное описание паттерна, его принципа работы, когда применять, плюсы/минусы, и **полный** пример на Java с подробными комментариями и демонстрацией сборки стека декораторов.
+
+---
+
+# Описание (основные моменты)
+Декоратор (Decorator) — структурный паттерн, который позволяет динамически добавлять объектам новую функциональность, оборачивая их в «обёртки» (декораторы). Обёртки и оборачиваемые объекты имеют общий интерфейс, поэтому клиентский код работает с ними одинаково.
+
+Ключевая идея: вместо роста числа подклассов для каждой комбинации поведения используем композицию — создаём набор независимых декораторов и комбинируем их во время выполнения.
+
+---
+
+# Принцип работы
+1. Есть общий интерфейс (например, `Notifier` с методом `send(String message)`).
+2. Конкретный компонент (`EmailNotifier`) реализует базовое поведение.
+3. Базовый декоратор (`NotifierDecorator`) содержит ссылку на `Notifier` (wrappee) и делегирует вызовы этому объекту.
+4. Конкретные декораторы расширяют поведение, выполняя дополнительную работу до или после делегирования.
+5. Клиент во время настройки «заворачивает» базовый объект в нужные декораторы (можно в несколько), получая комбинированное поведение.
+
+---
+
+# Когда применять (Применимость)
+- Нужно добавлять обязанности объектам на лету, не меняя клиентский код.
+- Нельзя (или не хочется) расширять класс через наследование (например, класс помечен `final`).
+- Требуется гибко комбинировать разные дополнительные поведения без комбинаторного взрыва подклассов.
+
+---
+
+# Плюсы
+- Гибкость: добавлять и комбинировать поведение во время выполнения.
+- Избегает большого числа подклассов (комбинаторный взрыв).
+- Декораторы сосредоточены на одной дополнительной ответственности — лучше разделение обязанностей.
+- Клиентский код не зависит от конкретных декораторов — использует общий интерфейс.
+
+# Минусы
+- Увеличивает число небольших классов/объектов.
+- Сложнее отладка — стек декораторов может затруднить трассировку поведения.
+- Нарушает простоту конструкции: нужно явно собирать (настраивать) стек декораторов.
+- Если интерфейс слишком богат — обязанность поддерживать весь интерфейс в декораторах увеличивает шаблонный код.
+
+---
+
+# Пример: реализация библиотеки уведомлений (Java)
+
+```java
+import java.util.List;
+import java.util.Arrays;
+
+/**
+ * Общий интерфейс компонента — все нотификаторы и декораторы
+ * реализуют этот интерфейс.
+ */
+interface Notifier {
+    /**
+     * Отправить уведомление (в простом виде — строковое сообщение).
+     * В реальной жизни сюда можно передавать более богатую модель.
+     */
+    void send(String message);
+}
+
+/**
+ * Конкретный компонент — базовая реализация отправки по Email.
+ * Эта реализация отвечает за простую логику отправки email.
+ */
+class EmailNotifier implements Notifier {
+    private final List<String> recipients;
+
+    public EmailNotifier(List<String> recipients) {
+        this.recipients = recipients;
+    }
+
+    @Override
+    public void send(String message) {
+        // В реальной библиотеке здесь будет интеграция с SMTP/API.
+        // Для примера — просто имитируем отправку.
+        System.out.println("[Email] Отправка по Email следующим получателям: " + recipients);
+        System.out.println("[Email] Тело сообщения: " + message);
+    }
+}
+
+/**
+ * Базовый декоратор. Хранит ссылку на обёрнутый компонент (wrappee)
+ * и по умолчанию делегирует вызовы ему.
+ *
+ * Конкретные декораторы расширяют этот класс и добавляют своё поведение.
+ */
+abstract class NotifierDecorator implements Notifier {
+    protected final Notifier wrappee;
+
+    protected NotifierDecorator(Notifier wrappee) {
+        this.wrappee = wrappee;
+    }
+
+    @Override
+    public void send(String message) {
+        // По умолчанию — делегируем обёрнутому объекту.
+        wrappee.send(message);
+    }
+}
+
+/**
+ * Конкретный декоратор — отправка SMS.
+ * Выполняет свою задачу, а затем (или до) делегирует дальнейшую работу.
+ */
+class SmsNotifierDecorator extends NotifierDecorator {
+    private final List<String> phoneNumbers;
+
+    public SmsNotifierDecorator(Notifier wrappee, List<String> phoneNumbers) {
+        super(wrappee);
+        this.phoneNumbers = phoneNumbers;
+    }
+
+    @Override
+    public void send(String message) {
+        // Дополнительное поведение: отправляем SMS
+        sendSms(message);
+        // Делегирование — дальше сообщение по прежнему обрабатывается wrappee
+        super.send(message);
+    }
+
+    private void sendSms(String message) {
+        // Заглушка: в реальности интеграция с SMS-шлюзом
+        System.out.println("[SMS] Отправка SMS: " + phoneNumbers + " -> " + message);
+    }
+}
+
+/**
+ * Конкретный декоратор — отправка в Facebook (пример).
+ */
+class FacebookNotifierDecorator extends NotifierDecorator {
+    private final String pageOrUserId;
+
+    public FacebookNotifierDecorator(Notifier wrappee, String pageOrUserId) {
+        super(wrappee);
+        this.pageOrUserId = pageOrUserId;
+    }
+
+    @Override
+    public void send(String message) {
+        // Можно изменить формат сообщения для FB
+        String fbMessage = formatForFacebook(message);
+        sendFacebookPost(fbMessage);
+        super.send(message);
+    }
+
+    private String formatForFacebook(String message) {
+        return "[FB] " + message; // пример форматирования
+    }
+
+    private void sendFacebookPost(String message) {
+        // Заглушка: в реальности вызов Facebook API
+        System.out.println("[Facebook] Пост на страницу/пользователя " + pageOrUserId + ": " + message);
+    }
+}
+
+/**
+ * Конкретный декоратор — отправка в Slack.
+ */
+class SlackNotifierDecorator extends NotifierDecorator {
+    private final String channel;
+
+    public SlackNotifierDecorator(Notifier wrappee, String channel) {
+        super(wrappee);
+        this.channel = channel;
+    }
+
+    @Override
+    public void send(String message) {
+        // Можно отправлять в Slack до (или после) делегирования
+        postToSlack(message);
+        super.send(message);
+    }
+
+    private void postToSlack(String message) {
+        // Заглушка: в реальности интеграция с Slack Webhook/API
+        System.out.println("[Slack] Сообщение в канал " + channel + ": " + message);
+    }
+}
+
+/**
+ * Демонстрация использования: сборка стека декораторов и отправка.
+ */
+public class NotifierExample {
+    public static void main(String[] args) {
+        // Базовый компонент — Email
+        Notifier email = new EmailNotifier(Arrays.asList("admin@example.com", "ops@example.com"));
+
+        // Клиент может "обернуть" базовый компонент нужными декораторами.
+        // Порядок: самый внешний декоратор — тот объект, с которым будет работать клиент.
+        Notifier notifier = new SlackNotifierDecorator(
+                                new FacebookNotifierDecorator(
+                                    new SmsNotifierDecorator(
+                                        email,
+                                        Arrays.asList("+420777111222", "+420777333444")
+                                    ),
+                                    "companyPageOrId"
+                                ),
+                                "#alerts"
+                             );
+
+        // Теперь клиенту не важно, сколько декораторов внутри — интерфейс тот же.
+        notifier.send("Критическая ошибка: переполнение памяти на сервере A1");
+
+        // Пример другой конфигурации: только Email + SMS
+        Notifier emailPlusSms = new SmsNotifierDecorator(email, Arrays.asList("+420777111222"));
+        emailPlusSms.send("Информационное сообщение: задача выполнена успешно.");
     }
 }
 ```
 
 ---
 
-# 2. Composite (Компоновщик)
-### Идея
-Компоновщик позволяет строить древовидные структуры объектов, где отдельные объекты и их комбинации обрабатываются одинаково. Это упрощает работу с иерархическими структурами, например, графическим деревом элементов или файловой системой. Паттерн обеспечивает единообразие интерфейса для работы с отдельными и составными объектами. Он облегчает добавление новых элементов без изменения существующего кода. Также упрощает рекурсивные операции над всей структурой.
+# Что делает код (коротко)
+- `EmailNotifier` — базовая отправка по e-mail.
+- `NotifierDecorator` — общий базовый декоратор, содержит `wrappee`.
+- `SmsNotifierDecorator`, `FacebookNotifierDecorator`, `SlackNotifierDecorator` — добавляют свои каналы отправки и затем делегируют остальную работу внутреннему компоненту.
+- В `main` показано, как собрать стек декораторов и получить комбинированное поведение (Slack → Facebook → SMS → Email). Клиент вызывает `send()` у внешнего объекта, а внутри последовательно выполняются все обёртки.
 
-### Когда использовать
-- Когда объекты образуют иерархию "часть-целое".
-- Когда нужно, чтобы клиент одинаково работал как с одиночными объектами, так и с их комбинациями.
+---
 
-### Плюсы / минусы
-+ Унифицированный способ работы с отдельными объектами и группами.  
-+ Легко строить сложные иерархии.  
-− Может быть сложно ограничить доступные операции для "листьев" и "композитов".  
-− Может быть трудно контролировать структуру (например, запретить пустые папки).
+# Пару практических замечаний
+- Декораторы могут модифицировать входящее сообщение (например, форматировать), могут фильтровать, изменять список адресатов, логировать или добавлять retry.
+- Если нужен обратный контроль (например, узнать, какие декораторы применены) — можно добавить вспомогательные методы/маркерные интерфейсы или использовать композицию с явной конфигурацией.
+- В реальных системах операции отправки обычно асинхронные; декоратор не отменяет необходимости проектировать обработку ошибок и повторных попыток.
 
-### Пример: файловая система (Файл и Папка)
+---
+
+# Паттерн «Фасад» — кратко и с примером на Java
+
+Ниже — сжатое и упорядоченное описание паттерна «Фасад», его принципа работы, когда применять, плюсы/минусы, и **полный** пример на Java с подробными комментариями и демонстрацией использования фасада для упрощения сложной подсистемы.
+
+---
+
+# Описание (основные моменты)
+Фасад (Facade) — структурный паттерн, который предоставляет простой интерфейс к сложной системе классов, библиотеке или фреймворку. Фасад скрывает детали реализации подсистемы и даёт клиенту удобную упрощённую точку входа для выполнения типичных задач.
+
+Ключевая идея: объединить взаимодействие с набором сложных классов в один (или несколько) фасадных классов, которые инкапсулируют порядок вызовов, конфигурацию объектов и трансформацию данных, необходимых для решения конкретной задачи.
+
+---
+
+# Принцип работы
+1. Существует сложная подсистема, состоящая из множества взаимосвязанных классов (часто — сторонний фреймворк или набор библиотечных классов).
+2. Клиенту не нужно знать все детали подсистемы и порядок обращений к ней.
+3. Фасад предоставляет ограниченный (урезанный) интерфейс, реализующий наиболее востребованные операции поверх подсистемы (например, `convert(filename, format)`).
+4. Внутри фасада находятся все необходимые шаги: инициализация, подбор компонентов, последовательные вызовы методов подсистемы и агрегация результатов.
+5. Клиент взаимодействует с фасадом — это уменьшает связанность и упрощает код клиента. При замене подсистемы нужно менять только фасад.
+
+---
+
+# Когда применять (Применимость)
+- Когда вам нужно представить простой или урезанный интерфейс к сложной подсистеме.
+- Когда подсистема развилась и стала громоздкой: много мелких классов, которые неудобно настраивать напрямую.
+- Когда нужно разделить подсистему на уровни и организовать точки входа на каждый уровень.
+- Когда требуется уменьшить зависимость кода приложения от конкретной реализации внешней библиотеки — фасад скрывает реализацию за простым API.
+
+---
+
+# Плюсы
+- Упрощает использование сложной подсистемы для клиента.
+- Снижает связанность между клиентским кодом и подсистемой — проще менять подсистему (только фасад).
+- Централизует конфигурацию и порядок вызовов, упрощая поддержку.
+- Может предоставить более безопасный и понятный API, ограничив доступ к небезопасным или ненужным операциям подсистемы.
+
+# Минусы
+- Фасад может стать «перегруженным», если в нём аккумулировать слишком много разных задач.
+- Урезанный интерфейс может не покрывать все возможности подсистемы — иногда потребуется обходить фасад и работать с подсистемой напрямую.
+- Дополнительный уровень абстракции — ещё один компонент, который нужно тестировать и поддерживать.
+
+---
+
+# Пример: реализация фасада для видеоконвертации (Java)
+
+Ниже приведён пример, где сложная подсистема видеоконвертации скрыта за простым фасадом `VideoConverter`. Код демонстрационный: реальная интеграция с кодеками/фреймворками потребует внешних зависимостей, здесь использованы заглушки и имитации поведения.
+
 ```java
-// CompositeDemo.java
-// Демонстрация: Папка содержит как файлы, так и другие папки.
-// Оба реализуют общий интерфейс FileSystemComponent.
+import java.io.File;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.ToString;
+/**
+ * Эти классы представляют собой "сложную подсистему" — кодеки,
+ * читатели/писатели, миксеры и т. п. В реальной жизни они могут
+ * принадлежать внешней библиотеке или фреймворку.
+ *
+ * В примере — простые заглушки с минимальной логикой.
+ */
 
-import java.util.ArrayList;
-import java.util.List;
+class VideoFile {
+    private final String name;
 
-public class CompositeDemo {
-    public static void main(String[] args) {
-        File file1 = new File("file1.txt");
-        File file2 = new File("file2.txt");
-        Directory dir = new Directory("docs");
-        dir.add(file1);
-        dir.add(file2);
-
-        Directory root = new Directory("root");
-        root.add(dir);
-        root.add(new File("readme.md"));
-
-        root.show();
-    }
-}
-
-interface FileSystemComponent {
-    void show();
-}
-
-@Getter
-@AllArgsConstructor
-@ToString
-class File implements FileSystemComponent {
-    private String name;
-
-    @Override
-    public void show() {
-        System.out.println("Файл: " + name);
-    }
-}
-
-@Getter
-@AllArgsConstructor
-class Directory implements FileSystemComponent {
-    private String name;
-    private List<FileSystemComponent> children = new ArrayList<>();
-
-    public Directory(String name) {
+    public VideoFile(String name) {
         this.name = name;
     }
 
-    public void add(FileSystemComponent component) {
-        children.add(component);
-    }
-
-    @Override
-    public void show() {
-        System.out.println("Папка: " + name);
-        for (FileSystemComponent child : children) {
-            child.show();
-        }
+    public String getName() {
+        return name;
     }
 }
-```
 
----
+class OggCompressionCodec {
+    @Override
+    public String toString() {
+        return "OggCompressionCodec";
+    }
+}
 
-# 3. Proxy (Заместитель)
-### Идея
-Заместитель предоставляет объект с тем же интерфейсом, что и реальный объект, и управляет доступом к нему. Он может использоваться для ленивой инициализации, контроля доступа или логирования вызовов. Паттерн позволяет скрыть сложность реального объекта от клиента. Также можно внедрить кэширование или другие вспомогательные функции без изменения реального объекта. Заместитель выступает посредником между клиентом и реальным объектом.
+class MPEG4CompressionCodec {
+    @Override
+    public String toString() {
+        return "MPEG4CompressionCodec";
+    }
+}
 
-### Когда использовать
-- Ленивое создание "тяжёлого" объекта (виртуальный прокси).
-- Добавление доступа/логирования без изменения реального объекта.
-- Удалённые прокси (работа через сеть).
+class CodecFactory {
+    public Object extract(VideoFile file) {
+        // В реальности логика выбора кодека основана на формате файла.
+        // Здесь — простая заглушка.
+        System.out.println("[CodecFactory] Извлекаем кодек для " + file.getName());
+        return new OggCompressionCodec();
+    }
+}
 
-### Плюсы / минусы
-+ Позволяет контролировать доступ и добавлять функциональность.  
-+ Поддержка ленивой загрузки.  
-− Усложняет код (ещё один уровень абстракции).  
-− Может быть лишним, если дополнительных функций нет.
+class BitrateReader {
+    public static String read(String filename, Object codec) {
+        // Чтение и декодирование байт-буфера из файла с использованием codec
+        System.out.println("[BitrateReader] Чтение " + filename + " с кодеком " + codec);
+        return "rawBuffer(" + filename + ")";
+    }
 
-### Пример: ленивое создание "тяжёлого" объекта
-```java
-// ProxyDemo.java
-// Пример: загружаем "тяжёлое" изображение только тогда, когда оно реально нужно.
+    public static String convert(String buffer, Object destinationCodec) {
+        // Конвертация буфера в целевой формат
+        System.out.println("[BitrateReader] Конвертация буфера " + buffer + " в " + destinationCodec);
+        return "converted(" + buffer + "->" + destinationCodec + ")";
+    }
+}
 
-public class ProxyDemo {
+class AudioMixer {
+    public String fix(String result) {
+        // Совмещение аудиопотока и финальная правка
+        System.out.println("[AudioMixer] Исправляем и миксуем аудио в результате: " + result);
+        return "fixed(" + result + ")";
+    }
+}
+
+/**
+ * Фасад: упрощённый интерфейс для работы со сложной подсистемой.
+ * Клиент вызывает только метод convert, не зная о множестве внутренних классов.
+ */
+class VideoConverterFacade {
+    /**
+     * Преобразовать файл в указанный формат и вернуть объект File с результатом.
+     * Внимание: в этом демонстрационном примере возвращается объект File,
+     * созданный из строки-результата для простоты представления.
+     */
+    public File convert(String filename, String format) {
+        System.out.println("[VideoConverterFacade] Запущена конвертация: " + filename + " -> " + format);
+
+        VideoFile file = new VideoFile(filename);
+
+        CodecFactory codecFactory = new CodecFactory();
+        Object sourceCodec = codecFactory.extract(file);
+
+        Object destinationCodec;
+        if ("mp4".equalsIgnoreCase(format)) {
+            destinationCodec = new MPEG4CompressionCodec();
+        } else {
+            destinationCodec = new OggCompressionCodec();
+        }
+
+        String buffer = BitrateReader.read(filename, sourceCodec);
+        String intermediate = BitrateReader.convert(buffer, destinationCodec);
+
+        AudioMixer audioMixer = new AudioMixer();
+        String result = audioMixer.fix(intermediate);
+
+        // Для демонстрации — создаём объект File, имитирующий конечный файл.
+        String resultFilename = filename + "." + format;
+        System.out.println("[VideoConverterFacade] Конвертация завершена, результат: " + resultFilename);
+        return new File(resultFilename);
+    }
+}
+
+/**
+ * Приложение (клиент), использующее фасад. Клиент не знает о внутренних классах.
+ */
+public class FacadeExample {
     public static void main(String[] args) {
-        Image image = new ProxyImage("photo.jpg");
-
-        // Файл ещё не загружен
-        image.display();
-
-        // Повторный вызов: файл уже загружен
-        image.display();
-    }
-}
-
-interface Image {
-    void display();
-}
-
-// Реальный объект
-class RealImage implements Image {
-    private String filename;
-
-    public RealImage(String filename) {
-        this.filename = filename;
-        loadFromDisk();
-    }
-
-    private void loadFromDisk() {
-        System.out.println("Загрузка изображения: " + filename);
-    }
-
-    @Override
-    public void display() {
-        System.out.println("Отображение: " + filename);
-    }
-}
-
-// Прокси: откладывает создание RealImage
-class ProxyImage implements Image {
-    private String filename;
-    private RealImage realImage;
-
-    public ProxyImage(String filename) {
-        this.filename = filename;
-    }
-
-    @Override
-    public void display() {
-        if (realImage == null) {
-            realImage = new RealImage(filename);
-        }
-        realImage.display();
+        VideoConverterFacade converter = new VideoConverterFacade();
+        File mp4 = converter.convert("funny-cats-video.ogg", "mp4");
+        // В реальном приложении мы бы сохранили файл или передали дальше.
+        System.out.println("[Application] Результирующий файл: " + mp4.getName());
     }
 }
 ```
 
 ---
 
-# 4. Flyweight (Легковес)
-### Идея
-Легковес позволяет использовать разделяемые объекты для уменьшения потребления памяти. Вместо создания множества похожих объектов, общий объект используется повторно с различными состояниями. Это особенно важно для систем с большим количеством однотипных объектов, например, символов текста или графических элементов. Паттерн разделяет внутреннее состояние (общие данные) и внешнее (конкретное для каждого использования). Он повышает эффективность памяти и производительность.
+# Что делает код (коротко)
+- Несколько классов (`VideoFile`, `CodecFactory`, `BitrateReader`, `AudioMixer`, кодеки) образуют сложную подсистему видеоконвертации.
+- `VideoConverterFacade` инкапсулирует весь порядок шагов и даёт простой метод `convert(filename, format)`.
+- Клиент (`FacadeExample`) использует только фасад и не зависит от внутренней структуры подсистемы.
 
-### Когда использовать
-- Нужно создать огромное количество похожих объектов (например, символы текста, частицы в игре).
-- Внутреннее состояние объектов одинаковое, а уникальное можно вынести наружу.
+---
 
-### Плюсы / минусы
-+ Сильно экономит память.  
-+ Ускоряет создание новых объектов (берём из кэша).  
-− Усложняет код (нужно разделять состояние).  
-− Сложно поддерживать, если много разных вариантов состояний.
+# Пару практических замечаний
+- Если подсистема содержит логически разные части, полезно создавать несколько специализированных фасадов, чтобы не перегружать один класс разнородной функциональностью.
+- Фасад не запрещает обращаться к подсистеме напрямую, если вам нужны расширенные возможности. Но стоит использовать фасад как стандартную точку входа.
+- Фасады хорошо подходят для реализации слоёв в архитектуре (например, API-слой вызывает фасад уровня бизнес-логики или интеграции).
 
-### Пример: символы в тексте
+---
+
+# Если хочешь — могу:
+- добавить пример, где фасад используется вместе с паттерном Адаптер,
+- показать unit-тесты для фасада,
+- преобразовать демонстрацию в асинхронную обработку (например, сохранение файла в облако),
+- или сохранить этот материал в Markdown-файл и дать ссылку для скачивания (если нужно).
+
+
+
+
+# Паттерн «Заместитель» (Proxy) — кратко и с примером на Java
+
+Ниже — сжатое и упорядоченное описание паттерна «Заместитель» (Proxy), его принципа работы, когда применять, плюсы/минусы, и **полный** пример на Java с подробными комментариями и демонстрацией разных вариантов прокси (кеширующий/виртуальный/защищающий).
+
+---
+
+# Описание (основные моменты)
+Заместитель (Proxy) — структурный паттерн, который позволяет подставлять вместо реальных объектов специальные объекты-заменители (proxy). Прокси перехватывает вызовы к оригинальному объекту и может выполнить дополнительную логику до или после делегирования вызова реальному объекту.
+
+Ключевая идея: у прокси и у реального сервиса общий интерфейс, поэтому прокси можно передавать в код, ожидающий сервисный объект, не меняя этот код.
+
+---
+
+# Принцип работы
+1. Определён общий интерфейс сервиса (например, `ThirdPartyYouTubeLib`).
+2. Реальная реализация этого интерфейса (`ThirdPartyYouTubeClass`) содержит тяжёлую/удалённую/чувствительную логику.
+3. Класс-прокси (`CachedYouTubeProxy`, `ProtectionProxy` и т.д.) также реализует интерфейс и содержит ссылку на реальный объект.
+4. При вызове методов прокси может:
+   - лениво создать реальный объект (виртуальный прокси),
+   - кешировать результаты и возвращать их без обращения к реальному объекту (кеширующий прокси),
+   - проверять права доступа перед делегированием (защищающий прокси),
+   - логировать вызовы, трансформировать данные или перенаправлять вызовы по сети (удалённый прокси) и т.д.
+5. Клиент работает с прокси так же, как с реальным сервисом.
+
+---
+
+# Когда применять (Применимость)
+- Ленивое создание тяжёлых объектов (виртуальный прокси).
+- Кеширование результатов дорогих запросов (кеширующий прокси).
+- Контроль доступа к ресурсу (защищающий/аутентифицирующий прокси).
+- Запросы к удалённому сервису (удалённый прокси, который сериализует/десериализует данные).
+- Логирование/мониторинг обращений к сервису.
+- Управление жизненным циклом реального объекта (умная ссылка).
+
+---
+
+# Плюсы
+- Скрывает от клиента дополнительную служебную логику (инициализация, кеш, безопасность).
+- Позволяет экономить ресурсы (ленивость, кеширование).
+- Централизует контроль доступа и/или логирование.
+- Не требует изменения клиентского кода — прокси реализует тот же интерфейс.
+
+# Минусы
+- Дополнительный уровень абстракции (ещё один класс).
+- Может добавлять задержки (если прокси делает дорогостоящие проверки).
+- Сложнее тестировать (надо тестировать и прокси, и реальный объект).
+- Избыточность, если прокси выполняет тривиальную работу.
+
+---
+
+# Пример: реализация прокси для сторонней библиотеки YouTube (Java)
+
+В этом примере показываются:
+- `ThirdPartyYouTubeLib` — интерфейс сервиса.
+- `ThirdPartyYouTubeClass` — «реальная» библиотека (заглушка).
+- `CachedYouTubeProxy` — прокси, который делает ленивую инициализацию и кеширует результаты.
+- `ProtectionProxy` — пример защищающего прокси, проверяющего права.
+- `YouTubeManager` — клиентский класс, использующий сервис через интерфейс.
+
 ```java
-// FlyweightDemo.java
-// Демонстрация: у нас есть много "символов".
-// Общая часть (глиф) хранится в Flyweight, а позиция — внешний контекст.
-
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
-public class FlyweightDemo {
-    public static void main(String[] args) {
-        GlyphFactory factory = new GlyphFactory();
+/**
+ * Интерфейс удалённого сервиса.
+ */
+interface ThirdPartyYouTubeLib {
+    List<String> listVideos();
+    String getVideoInfo(String id);
+    void downloadVideo(String id);
+}
 
-        Glyph g1 = factory.getGlyph('a');
-        Glyph g2 = factory.getGlyph('a');
-        Glyph g3 = factory.getGlyph('b');
+/**
+ * "Реальная" реализация сторонней библиотеки.
+ * В реальной жизни это был бы внешний SDK, мы его не контролируем.
+ * Здесь — простая имитация длительных сетевых операций.
+ */
+class ThirdPartyYouTubeClass implements ThirdPartyYouTubeLib {
 
-        g1.draw(1, 1);
-        g2.draw(2, 2);
-        g3.draw(3, 3);
+    public ThirdPartyYouTubeClass() {
+        // Инициализация может быть дорогой (например, открытие сетевых подключений)
+        heavyInitialConfiguration();
     }
-}
 
-interface Glyph {
-    void draw(int x, int y);
-}
-
-// Конкретный легковес
-class CharacterGlyph implements Glyph {
-    private final char symbol;
-
-    public CharacterGlyph(char symbol) {
-        this.symbol = symbol;
+    private void heavyInitialConfiguration() {
+        System.out.println("[ThirdPartyYouTubeClass] Выполняется тяжёлая инициализация...");
+        try {
+            Thread.sleep(500); // Имитация задержки при инициализации
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
-    public void draw(int x, int y) {
-        System.out.println("Рисуем '" + symbol + "' в позиции (" + x + "," + y + ")");
-    }
-}
-
-// Фабрика легковесов
-class GlyphFactory {
-    private final Map<Character, Glyph> cache = new HashMap<>();
-
-    public Glyph getGlyph(char c) {
-        return cache.computeIfAbsent(c, CharacterGlyph::new);
-    }
-}
-```
-
----
-
-# 5. Facade (Фасад)
-Фасад предоставляет упрощённый интерфейс для работы со сложной системой. Клиент взаимодействует с фасадом, не зная всех деталей и внутренних компонентов системы. Паттерн упрощает использование системы и скрывает сложность её реализации. Он снижает связность между клиентом и компонентами системы. Фасад также облегчает поддержку и модификацию системы.
-
-### Когда использовать
-- Сложная система, много классов и зависимостей.
-- Хотите упростить работу клиента и скрыть детали.
-
-### Плюсы / минусы
-+ Упрощает интерфейс системы.  
-+ Скрывает детали реализации.  
-− Может превратиться в "God object", если в него тянуть слишком много функций.  
-− Иногда скрывает слишком много и ограничивает гибкость.
-
-### Пример: Домашний кинотеатр
-```java
-// FacadeDemo.java
-// Демонстрация: клиент включает кинотеатр одной командой, а не кучей.
-
-public class FacadeDemo {
-    public static void main(String[] args) {
-        HomeTheaterFacade theater = new HomeTheaterFacade(
-                new Amplifier(),
-                new Projector(),
-                new Screen()
-        );
-
-        theater.watchMovie("Inception");
-        theater.endMovie();
-    }
-}
-
-// Подсистемы
-class Amplifier {
-    public void on() { System.out.println("Усилитель включен"); }
-    public void off() { System.out.println("Усилитель выключен"); }
-}
-
-class Projector {
-    public void on() { System.out.println("Проектор включен"); }
-    public void off() { System.out.println("Проектор выключен"); }
-}
-
-class Screen {
-    public void down() { System.out.println("Экран опущен"); }
-    public void up() { System.out.println("Экран поднят"); }
-}
-
-// Фасад
-class HomeTheaterFacade {
-    private Amplifier amp;
-    private Projector projector;
-    private Screen screen;
-
-    public HomeTheaterFacade(Amplifier amp, Projector projector, Screen screen) {
-        this.amp = amp;
-        this.projector = projector;
-        this.screen = screen;
-    }
-
-    public void watchMovie(String movie) {
-        System.out.println("Готовим кинотеатр к просмотру...");
-        screen.down();
-        amp.on();
-        projector.on();
-        System.out.println("Запускаем фильм: " + movie);
-    }
-
-    public void endMovie() {
-        System.out.println("Выключаем кинотеатр...");
-        screen.up();
-        projector.off();
-        amp.off();
-    }
-}
-```
-
----
-
-# 6. Bridge (Мост)
-### Идея
-Мост разделяет абстракцию и реализацию на два отдельных класса, которые могут изменяться независимо. Это позволяет создавать разные реализации абстракции без модификации её интерфейса. Паттерн помогает уменьшить количество подклассов при сочетании разных вариантов абстракции и реализации. Он делает систему более гибкой и расширяемой. Используется, когда требуется разделение интерфейса и реализации.
-
-### Когда использовать
-- Нужно разделить уровни (например, разные виды форм + разные способы отрисовки).
-- Когда абстракция и реализация должны изменяться независимо.
-
-### Плюсы / минусы
-+ Абстракция и реализация независимы.  
-+ Легко добавлять новые реализации и новые абстракции.  
-− Усложняет структуру кода (дополнительный слой).  
-− Может быть избыточен для маленьких систем.
-
-### Пример: фигуры и способы их рисования
-```java
-// BridgeDemo.java
-// Демонстрация: фигура (Shape) использует интерфейс Renderer для рисования.
-// Можно легко добавлять новые фигуры или новые способы рендера.
-
-public class BridgeDemo {
-    public static void main(String[] args) {
-        Renderer vector = new VectorRenderer();
-        Renderer raster = new RasterRenderer();
-
-        Shape circle1 = new Circle(vector);
-        Shape circle2 = new Circle(raster);
-
-        circle1.draw();
-        circle2.draw();
-    }
-}
-
-interface Renderer {
-    void renderCircle(float radius);
-}
-
-class VectorRenderer implements Renderer {
-    public void renderCircle(float radius) {
-        System.out.println("Рисуем круг в векторном виде с радиусом " + radius);
-    }
-}
-
-class RasterRenderer implements Renderer {
-    public void renderCircle(float radius) {
-        System.out.println("Рисуем пиксельный круг с радиусом " + radius);
-    }
-}
-
-// Абстракция
-abstract class Shape {
-    protected Renderer renderer;
-
-    public Shape(Renderer renderer) {
-        this.renderer = renderer;
-    }
-
-    public abstract void draw();
-}
-
-class Circle extends Shape {
-    private float radius = 5;
-
-    public Circle(Renderer renderer) {
-        super(renderer);
+    public List<String> listVideos() {
+        // Имитация сетевого запроса
+        simulateNetworkLatency();
+        List<String> list = new ArrayList<>();
+        list.add("cat_video_id_1");
+        list.add("funny_dogs_42");
+        list.add("java_tutorial_99");
+        System.out.println("[ThirdPartyYouTubeClass] Получен список видео.");
+        return list;
     }
 
     @Override
-    public void draw() {
-        renderer.renderCircle(radius);
-    }
-}
-```
-
----
-
-# 7. Decorator (Декоратор)
-### Идея
-Декоратор позволяет динамически добавлять новые функциональные возможности объекту без изменения его структуры. Каждый декоратор реализует тот же интерфейс, что и исходный объект, и может оборачивать его. Паттерн упрощает расширение функциональности по сравнению с наследованием. Он делает систему гибкой и позволяет комбинировать декораторы. Применяется, когда нужно добавлять поведение объектам во время выполнения.
-### Когда использовать
-- Нужно добавлять новые обязанности объектам на лету.
-- Не хочется создавать кучу подклассов.
-
-### Плюсы / минусы
-+ Позволяет гибко добавлять функциональность без изменения исходного кода.  
-+ Можно комбинировать несколько декораторов.  
-− Много мелких классов, которые могут усложнить понимание.  
-− Не всегда очевидно, в каком порядке применяются декораторы.
-
-### Пример: добавление функциональности кофе
-```java
-// DecoratorDemo.java
-// Демонстрация: есть базовый кофе, и мы можем добавлять "ингредиенты" (молоко, сахар).
-// Каждый декоратор оборачивает исходный объект.
-
-public class DecoratorDemo {
-    public static void main(String[] args) {
-        Coffee coffee = new SimpleCoffee();
-        System.out.println(coffee.getDescription() + " = " + coffee.getCost());
-
-        coffee = new MilkDecorator(coffee);
-        System.out.println(coffee.getDescription() + " = " + coffee.getCost());
-
-        coffee = new SugarDecorator(coffee);
-        System.out.println(coffee.getDescription() + " = " + coffee.getCost());
-    }
-}
-
-interface Coffee {
-    String getDescription();
-    double getCost();
-}
-
-// Базовый класс
-class SimpleCoffee implements Coffee {
-    @Override
-    public String getDescription() {
-        return "Обычный кофе";
+    public String getVideoInfo(String id) {
+        simulateNetworkLatency();
+        String info = "VideoInfo(" + id + ")";
+        System.out.println("[ThirdPartyYouTubeClass] Получена информация о видео: " + id);
+        return info;
     }
 
     @Override
-    public double getCost() {
-        return 2.0;
-    }
-}
-
-// Декоратор
-abstract class CoffeeDecorator implements Coffee {
-    protected Coffee decoratedCoffee;
-
-    public CoffeeDecorator(Coffee coffee) {
-        this.decoratedCoffee = coffee;
-    }
-}
-
-// Конкретные декораторы
-class MilkDecorator extends CoffeeDecorator {
-    public MilkDecorator(Coffee coffee) {
-        super(coffee);
+    public void downloadVideo(String id) {
+        simulateNetworkLatency();
+        System.out.println("[ThirdPartyYouTubeClass] Видео скачано: " + id);
     }
 
-    @Override
-    public String getDescription() {
-        return decoratedCoffee.getDescription() + ", молоко";
-    }
-
-    @Override
-    public double getCost() {
-        return decoratedCoffee.getCost() + 0.5;
-    }
-}
-
-class SugarDecorator extends CoffeeDecorator {
-    public SugarDecorator(Coffee coffee) {
-        super(coffee);
-    }
-
-    @Override
-    public String getDescription() {
-        return decoratedCoffee.getDescription() + ", сахар";
-    }
-
-    @Override
-    public double getCost() {
-        return decoratedCoffee.getCost() + 0.2;
-    }
-}
-```
-
----
-
-
-# Заключение
-- **Adapter** — подключаем несовместимые интерфейсы.  
-- **Composite** — дерево объектов (часть-целое).  
-- **Proxy** — контролируем доступ к объекту.  
-- **Flyweight** — экономим память, разделяя общее состояние.  
-- **Facade** — упрощаем доступ к сложной системе.  
-- **Bridge** — разделяем абстракцию и реализацию.  
-- **Decorator** — добавляем функциональность объекту динамически.
-
-# Поведенческие паттерны проектирования
-
-## 1. Template Method (Шаблонный метод)
-**Описание:** Шаблонный метод позволяет определить общий алгоритм в виде последовательности шагов в базовом классе, при этом оставляя конкретную реализацию отдельных шагов подклассам. Такой подход помогает повторно использовать код и обеспечивает единообразие алгоритмов, при этом позволяя подклассам менять только детали без изменения общей структуры.
-
-**Плюсы:**
-- Централизованное управление алгоритмом.
-- Возможность переопределять отдельные шаги алгоритма.
-
-**Минусы:**
-- Подклассы жестко зависят от структуры базового класса.
-- Меньшая гибкость по сравнению с Strategy.
-
-**Когда применять:**
-- Когда есть повторяющаяся структура алгоритма и необходимо менять только отдельные шаги.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
-abstract class DataProcessor {
-    public final void process() {
-        readData();  // шаг 1: чтение данных
-        processData(); // шаг 2: обработка данных
-        saveData();    // шаг 3: сохранение данных
-    }
-
-    protected abstract void readData();
-    protected abstract void processData();
-    protected abstract void saveData();
-}
-
-@Slf4j
-class CSVDataProcessor extends DataProcessor {
-    @Override
-    protected void readData() {
-        log.info("Чтение CSV данных");
-    }
-
-    @Override
-    protected void processData() {
-        log.info("Обработка CSV данных");
-    }
-
-    @Override
-    protected void saveData() {
-        log.info("Сохранение CSV данных");
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        DataProcessor processor = new CSVDataProcessor();
-        processor.process();
-    }
-}
-```
-
----
-
-## 2. Mediator (Посредник)
-**Описание:** Посредник централизует взаимодействие между объектами. Вместо того чтобы компоненты напрямую ссылались друг на друга, они общаются через посредника. Это снижает связность и упрощает поддержку сложных систем с большим количеством взаимозависимых объектов.
-
-**Плюсы:**
-- Уменьшение связности компонентов.
-- Упрощение изменений и добавления новых взаимодействий.
-
-**Минусы:**
-- Посредник может стать слишком сложным и тяжёлым для поддержки.
-
-**Когда применять:**
-- Когда много объектов взаимодействуют друг с другом и необходимо централизовать это взаимодействие.
-
-```java
-import lombok.Data;
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
-class Mediator {
-    public void notify(Component sender, String event) {
-        if (event.equals("A")) {
-            log.info("Mediator реагирует на событие A и инициирует действия B");
-        } else if (event.equals("B")) {
-            log.info("Mediator реагирует на событие B и инициирует действия A");
+    private void simulateNetworkLatency() {
+        try {
+            Thread.sleep(300); // Имитация задержки запроса
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
 
-@Data
-class Component {
-    private Mediator mediator;
+/**
+ * Кеширующий и виртуальный прокси.
+ * Делает ленивую инициализацию реального сервиса и кеширует результаты.
+ */
+class CachedYouTubeProxy implements ThirdPartyYouTubeLib {
 
-    public void trigger(String event) {
-        log.info("Component триггерит событие: {}", event);
-        mediator.notify(this, event);
+    private ThirdPartyYouTubeLib service;
+    private List<String> listCache;
+    private Map<String, String> infoCache;
+    private boolean needReset = false;
+
+    public CachedYouTubeProxy() {
+        this.infoCache = new HashMap<>();
+    }
+
+    // Лениво создаём реальный сервис только при первом обращении
+    private synchronized ThirdPartyYouTubeLib getService() {
+        if (service == null) {
+            System.out.println("[CachedYouTubeProxy] Создаём реальный сервис...");
+            service = new ThirdPartyYouTubeClass();
+        }
+        return service;
+    }
+
+    @Override
+    public List<String> listVideos() {
+        if (listCache == null || needReset) {
+            System.out.println("[CachedYouTubeProxy] Кеш пуст или сброшен, запрашиваем у сервиса...");
+            listCache = getService().listVideos();
+        } else {
+            System.out.println("[CachedYouTubeProxy] Возвращаем список из кеша.");
+        }
+        return listCache;
+    }
+
+    @Override
+    public String getVideoInfo(String id) {
+        if (!infoCache.containsKey(id) || needReset) {
+            System.out.println("[CachedYouTubeProxy] Инфо не в кеше или кеш сброшен, запрашиваем у сервиса...");
+            String info = getService().getVideoInfo(id);
+            infoCache.put(id, info);
+        } else {
+            System.out.println("[CachedYouTubeProxy] Возвращаем инфо из кеша для " + id);
+        }
+        return infoCache.get(id);
+    }
+
+    @Override
+    public void downloadVideo(String id) {
+        // Для операций загрузки обычно не кешируем — делегируем реальному сервису.
+        System.out.println("[CachedYouTubeProxy] Делегируем загрузку реальному сервису для " + id);
+        getService().downloadVideo(id);
+    }
+
+    public void resetCache() {
+        System.out.println("[CachedYouTubeProxy] Сбрасываем кеш.");
+        needReset = true;
     }
 }
 
-public class Main {
+/**
+ * Пример защищающего прокси, выполняющего проверку прав доступа
+ * перед делегированием к реальному сервису.
+ */
+class ProtectionProxy implements ThirdPartyYouTubeLib {
+
+    private final ThirdPartyYouTubeLib service;
+    private final String userRole;
+
+    public ProtectionProxy(ThirdPartyYouTubeLib service, String userRole) {
+        this.service = service;
+        this.userRole = userRole;
+    }
+
+    private boolean hasAccess(String operation) {
+        // Простая демонстрация прав: только "admin" может скачивать видео.
+        if ("download".equals(operation)) {
+            return "admin".equalsIgnoreCase(userRole);
+        }
+        // Другие операции доступны всем
+        return true;
+    }
+
+    @Override
+    public List<String> listVideos() {
+        if (!hasAccess("list")) {
+            throw new SecurityException("Нет прав для получения списка видео");
+        }
+        return service.listVideos();
+    }
+
+    @Override
+    public String getVideoInfo(String id) {
+        if (!hasAccess("info")) {
+            throw new SecurityException("Нет прав для получения информации о видео");
+        }
+        return service.getVideoInfo(id);
+    }
+
+    @Override
+    public void downloadVideo(String id) {
+        if (!hasAccess("download")) {
+            throw new SecurityException("Нет прав для скачивания видео");
+        }
+        service.downloadVideo(id);
+    }
+}
+
+/**
+ * Клиентский класс, использующий сервис через интерфейс.
+ * Ему безразлично, работает ли он с реальным сервисом или прокси.
+ */
+class YouTubeManager {
+    protected ThirdPartyYouTubeLib service;
+
+    public YouTubeManager(ThirdPartyYouTubeLib service) {
+        this.service = service;
+    }
+
+    public void renderVideoPage(String id) {
+        String info = service.getVideoInfo(id);
+        System.out.println("[YouTubeManager] Рендер страницы видео: " + info);
+    }
+
+    public void renderListPanel() {
+        List<String> list = service.listVideos();
+        System.out.println("[YouTubeManager] Список видео: " + list);
+    }
+
+    public void reactOnUserInput(String id) {
+        renderVideoPage(id);
+        renderListPanel();
+    }
+}
+
+/**
+ * Демонстрация использования различных прокси.
+ */
+public class ProxyExample {
     public static void main(String[] args) {
-        Mediator mediator = new Mediator();
-        Component comp1 = new Component();
-        Component comp2 = new Component();
+        System.out.println("=== Пример с кеширующим и виртуальным прокси ===");
+        CachedYouTubeProxy cachedProxy = new CachedYouTubeProxy();
+        YouTubeManager managerWithCache = new YouTubeManager(cachedProxy);
 
-        comp1.setMediator(mediator);
-        comp2.setMediator(mediator);
+        // Первый вызов — будет лениво создан реальный сервис и результаты закешированы
+        managerWithCache.reactOnUserInput("cat_video_id_1");
+        System.out.println();
 
-        comp1.trigger("A");
-        comp2.trigger("B");
+        // Второй вызов — данные возьмутся из кеша, реальный сервис не будет обращаться к сети
+        managerWithCache.reactOnUserInput("cat_video_id_1");
+        System.out.println();
+
+        System.out.println("=== Пример с защищающим прокси ===");
+        // Создадим настоящий сервис и затем обернём его защитным прокси для пользователя "guest"
+        ThirdPartyYouTubeLib realService = new ThirdPartyYouTubeClass();
+        ProtectionProxy guestProxy = new ProtectionProxy(realService, "guest");
+        YouTubeManager managerForGuest = new YouTubeManager(guestProxy);
+
+        managerForGuest.renderListPanel();
+        try {
+            // Попытка скачать видео от гостя — ожидаем ошибку
+            guestProxy.downloadVideo("funny_dogs_42");
+        } catch (SecurityException ex) {
+            System.out.println("[Application] Ошибка безопасности: " + ex.getMessage());
+        }
+
+        System.out.println();
+
+        // Теперь админ имеет право скачивать
+        ProtectionProxy adminProxy = new ProtectionProxy(realService, "admin");
+        adminProxy.downloadVideo("funny_dogs_42");
     }
 }
 ```
 
----
+## Поведенческие паттерны
 
-## 3. Chain of Responsibility (Цепочка обязанностей)
-**Описание:** Позволяет передавать запрос по цепочке объектов до тех пор, пока один из них не обработает его. Отправитель запроса не знает, какой объект его обработает, что делает систему гибкой и легко расширяемой.
+# Цепочка обязанностей
+Цепочка обязанностей — это поведенческий паттерн проектирования, который позволяет передавать запросы последовательно по цепочке обработчиков. Каждый последующий обработчик решает, может ли он обработать запрос сам и стоит ли передавать запрос дальше по цепи.
 
-**Плюсы:**
-- Гибкость в обработке запросов.
-- Разделение обязанностей.
+# Паттерн «Стратегия» — кратко и с примером на Java
 
-**Минусы:**
-- Нет гарантии, что запрос будет обработан.
-- Цепочка может стать слишком длинной.
-
-**Когда применять:**
-- Когда запрос может быть обработан несколькими объектами и нужно избегать жёсткой зависимости.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
-abstract class Handler {
-    protected Handler next;
-
-    public void setNext(Handler next) {
-        this.next = next;
-    }
-
-    public abstract void handle(String request);
-}
-
-@Slf4j
-class ConcreteHandlerA extends Handler {
-    @Override
-    public void handle(String request) {
-        if (request.equals("A")) {
-            log.info("Handler A обработал запрос");
-        } else if (next != null) {
-            next.handle(request);
-        }
-    }
-}
-
-@Slf4j
-class ConcreteHandlerB extends Handler {
-    @Override
-    public void handle(String request) {
-        if (request.equals("B")) {
-            log.info("Handler B обработал запрос");
-        } else if (next != null) {
-            next.handle(request);
-        }
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Handler handlerA = new ConcreteHandlerA();
-        Handler handlerB = new ConcreteHandlerB();
-        handlerA.setNext(handlerB);
-
-        handlerA.handle("B");
-    }
-}
-```
+Ниже — сжатое и упорядоченное описание паттерна «Стратегия», его принципа работы, когда применять, плюсы/минусы, и **полный** пример на Java с подробными комментариями. Комментарии в коде сохранены как в исходном описании.
 
 ---
 
-## 4. Observer (Наблюдатель)
-**Описание:** Наблюдатель позволяет объектам подписываться на события другого объекта и автоматически получать уведомления об изменениях. Основная цель — слабая связка между объектами: субъекты уведомляют наблюдателей без знания их внутренней реализации.
+# Описание (основные моменты)
+Стратегия (Strategy) — поведенческий паттерн, который определяет семейство схожих алгоритмов и помещает каждый из них в собственный класс. После этого алгоритмы можно взаимозаменять прямо во время выполнения программы. Контекст использует один из объектов-стратегий через общий интерфейс, не завися от конкретной реализации.
 
-**Плюсы:**
-- Слабая связка между объектами.
-- Легкое добавление новых наблюдателей.
-
-**Минусы:**
-- Сложно отследить всех подписчиков.
-- Массовое уведомление может снизить производительность.
-
-**Когда применять:**
-- Когда один объект должен уведомлять множество других о своих изменениях.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-import java.util.ArrayList;
-import java.util.List;
-
-@Slf4j
-interface Observer {
-    void update(String message);
-}
-
-@Slf4j
-class ConcreteObserver implements Observer {
-    private String name;
-
-    public ConcreteObserver(String name) {
-        this.name = name;
-    }
-
-    @Override
-    public void update(String message) {
-        log.info("Observer {} получил сообщение: {}", name, message);
-    }
-}
-
-@Slf4j
-class Subject {
-    private List<Observer> observers = new ArrayList<>();
-
-    public void addObserver(Observer observer) {
-        observers.add(observer);
-    }
-
-    public void notifyObservers(String message) {
-        for (Observer observer : observers) {
-            observer.update(message);
-        }
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Subject subject = new Subject();
-        subject.addObserver(new ConcreteObserver("A"));
-        subject.addObserver(new ConcreteObserver("B"));
-
-        subject.notifyObservers("Событие произошло");
-    }
-}
-```
+Ключевая идея: вынести изменяемые/расширяемые алгоритмы в отдельные классы (стратегии), а в основном классе (контексте) держать только ссылку на стратегию и делегировать ей выполнение задачи.
 
 ---
 
-## 5. Strategy (Стратегия)
-**Описание:** Стратегия позволяет менять алгоритм или поведение объекта во время выполнения. Основная идея — вынести алгоритмы в отдельные классы и использовать их через общий интерфейс, что обеспечивает гибкость и слабую связку.
+# Принцип работы
+1. Определён общий интерфейс стратегий (например, `Strategy` с методом `execute(a, b)`).
+2. Каждая конкретная стратегия реализует этот интерфейс своим способом (сложность/поведение алгоритма инкапсулировано в классе стратегии).
+3. Контекст содержит ссылку на интерфейс стратегии и в нужный момент вызывает `strategy.execute(...)`.
+4. Клиент создаёт конкретную стратегию и передаёт её в контекст; стратегию можно менять в рантайме через сеттер.
 
-**Плюсы:**
-- Легкая замена алгоритмов.
-- Слабая связка между контекстом и стратегиями.
+---
 
-**Минусы:**
-- Увеличение количества классов.
+# Когда применять (Применимость)
+- Когда нужно использовать разные вариации какого‑то алгоритма внутри одного объекта.
+- Когда есть множество похожих классов, отличающихся только поведением: стратегия позволяет свести их к одному классу с настраиваемым поведением.
+- Когда не хочется раскрывать детали реализации алгоритмов другим классам.
+- Когда в коде встречается большой условный оператор (switch/if-else) с ветками-алгоритмами — каждую ветку можно вынести в отдельную стратегию.
 
-**Когда применять:**
-- Когда требуется менять поведение объекта во время выполнения.
+---
+
+# Плюсы
+- Разделение алгоритмов по классам — легче поддерживать и тестировать.
+- Возможность менять поведение объекта во время выполнения.
+- Уменьшение связности: контекст не зависит от конкретных реализаций стратегий.
+- Легко добавлять новые стратегии, не меняя код контекста или существующих стратегий.
+
+# Минусы
+- Рост количества классов в проекте (каждый алгоритм — отдельный класс).
+- Клиент должен знать, какую стратегию выбрать и передать в контекст.
+- При богатом интерфейсе стратегий придётся реализовывать много методов в каждой стратегии, что увеличит шаблонный код.
+
+---
+
+# Пример: арифметические стратегии (Java)
+
+В этом примере показано, как вынести разные арифметические операции в свои стратегии и использовать их через контекст.
 
 ```java
-import lombok.extern.slf4j.Slf4j;
-
-@Slf4j
-interface PaymentStrategy {
-    void pay(int amount);
+/**
+ * Общий интерфейс всех стратегий.
+ */
+interface Strategy {
+    /**
+     * Выполнить операцию над двумя числами.
+     * @param a первое число
+     * @param b второе число
+     * @return результат операции
+     */
+    int execute(int a, int b);
 }
 
-@Slf4j
-class CreditCardPayment implements PaymentStrategy {
+/**
+ * Каждая конкретная стратегия реализует общий интерфейс своим способом.
+ */
+class ConcreteStrategyAdd implements Strategy {
     @Override
-    public void pay(int amount) {
-        log.info("Оплата {} кредитной картой", amount);
+    public int execute(int a, int b) {
+        return a + b;
     }
 }
 
-@Slf4j
-class PayPalPayment implements PaymentStrategy {
+class ConcreteStrategySubtract implements Strategy {
     @Override
-    public void pay(int amount) {
-        log.info("Оплата {} через PayPal", amount);
+    public int execute(int a, int b) {
+        return a - b;
     }
 }
 
-@Slf4j
-class ShoppingCart {
-    private PaymentStrategy strategy;
+class ConcreteStrategyMultiply implements Strategy {
+    @Override
+    public int execute(int a, int b) {
+        return a * b;
+    }
+}
 
-    public void setPaymentStrategy(PaymentStrategy strategy) {
+/**
+ * Контекст всегда работает со стратегиями через общий интерфейс.
+ * Он не знает, какая именно стратегия ему подана.
+ */
+class Context {
+    private Strategy strategy;
+
+    /**
+     * Позволяет менять стратегию на лету.
+     * @param strategy объект-стратегия
+     */
+    public void setStrategy(Strategy strategy) {
         this.strategy = strategy;
     }
 
-    public void checkout(int amount) {
-        strategy.pay(amount); // делегирование оплаты выбранной стратегии
+    /**
+     * Выполнить операцию, делегируя работу стратегии.
+     * @param a первое число
+     * @param b второе число
+     * @return результат выполнения стратегии
+     */
+    public int executeStrategy(int a, int b) {
+        if (strategy == null) {
+            throw new IllegalStateException("Стратегия не установлена");
+        }
+        return strategy.execute(a, b);
     }
 }
 
-public class Main {
+/**
+ * Конкретная стратегия выбирается на более высоком уровне,
+ * например, конфигуратором всего приложения. Готовый объект-
+ * стратегия подаётся в клиентский объект, а затем может быть
+ * заменён другой стратегией в любой момент на лету.
+ */
+public class StrategyExample {
     public static void main(String[] args) {
-        ShoppingCart cart = new ShoppingCart();
-        cart.setPaymentStrategy(new CreditCardPayment());
-        cart.checkout(500);
+        Context context = new Context();
 
-        cart.setPaymentStrategy(new PayPalPayment());
-        cart.checkout(1000);
-    }
-}
+        int n1 = 10;
+        int n2 = 5;
 
----
+        // 1. Выбираем операцию — сложение
+        context.setStrategy(new ConcreteStrategyAdd());
+        int resultAdd = context.executeStrategy(n1, n2);
+        System.out.println("Addition result: " + resultAdd); // 15
 
-## 6. Command (Команда)
-**Описание:** Паттерн Команда инкапсулирует запрос как объект, позволяя параметризовать объекты действиями, ставить их в очередь или журналировать. Он отделяет отправителя запроса от объекта, который выполняет действие. Такой подход облегчает реализацию отмены и повтора операций, а также поддержку макросов. Паттерн обеспечивает гибкость и расширяемость системы, позволяя легко добавлять новые команды без изменения существующих классов. Команды могут быть сохранены и выполнены позже, что делает их удобными для отложенных действий.
+        // 2. Меняем стратегию на вычитание
+        context.setStrategy(new ConcreteStrategySubtract());
+        int resultSub = context.executeStrategy(n1, n2);
+        System.out.println("Subtraction result: " + resultSub); // 5
 
-**Плюсы:**
-- Инкапсуляция действий.
-- Возможность реализовать отмену и повтор операций.
-- Упрощает поддержку макросов и отложенного выполнения.
+        // 3. Меняем стратегию на умножение
+        context.setStrategy(new ConcreteStrategyMultiply());
+        int resultMul = context.executeStrategy(n1, n2);
+        System.out.println("Multiplication result: " + resultMul); // 50
 
-**Минусы:**
-- Увеличение числа классов.
-- Может усложнить структуру проекта при большом количестве команд.
-
-**Когда применять:**
-- Когда нужно параметризовать объекты действиями.
-- Когда требуется сохранять, журналировать или откатывать действия.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-
-// Интерфейс команды с методом execute
-@Slf4j
-interface Command {
-    void execute();
-}
-
-// Класс устройства, на котором выполняются команды
-@Slf4j
-class Light {
-    public void turnOn() {
-        log.info("Свет включен");
-    }
-
-    public void turnOff() {
-        log.info("Свет выключен");
-    }
-}
-
-// Конкретная команда включения света
-@Slf4j
-class TurnOnCommand implements Command {
-    private Light light;
-
-    public TurnOnCommand(Light light) {
-        this.light = light;
-    }
-
-    @Override
-    public void execute() {
-        light.turnOn(); // делегируем действие устройству
-    }
-}
-
-// Пульт управления, который вызывает команды
-@Slf4j
-class RemoteControl {
-    private Command command;
-
-    public void setCommand(Command command) {
-        this.command = command;
-    }
-
-    public void pressButton() {
-        command.execute(); // выполняем команду
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Light light = new Light();
-        Command turnOn = new TurnOnCommand(light);
-        RemoteControl remote = new RemoteControl();
-        remote.setCommand(turnOn);
-        remote.pressButton(); // включение света через команду
+        // Пример динамической подстановки стратегии в рантайме
+        // (например, пользователь выбрал тип маршрута в UI).
     }
 }
 ```
 
 ---
 
-## 7. State (Состояние)
-**Описание:** Паттерн Состояние позволяет объекту изменять поведение при изменении его внутреннего состояния. Каждый объект состояния инкапсулирует определённое поведение, что заменяет громоздкие конструкции if/else или switch. Паттерн повышает читаемость и расширяемость кода. Объект делегирует выполнение методов своему текущему состоянию, что делает систему более гибкой. Легко добавлять новые состояния без изменения существующих классов.
+# Что делает код (коротко)
+- `Strategy` — общий интерфейс для всех алгоритмов.
+- `ConcreteStrategyAdd`, `ConcreteStrategySubtract`, `ConcreteStrategyMultiply` — конкретные стратегии, каждая реализует алгоритм.
+- `Context` — класс, использующий стратегию через интерфейс; стратегия может быть установлена и заменена в любом месте программы.
+- `StrategyExample` демонстрирует смену стратегий и выполнение операций.
 
-**Плюсы:**
-- Упрощает код с множеством условий.
-- Легко добавлять новые состояния.
-- Повышает читаемость и поддержку.
+---
 
-**Минусы:**
-- Увеличение числа классов.
-- Сложнее отследить все состояния в больших системах.
+# Практические замечания
+- Стратегии должны быть взаимозаменяемыми и не держать большого количества внешних зависимостей.
+- Если стратегии тяжелые для создания, можно комбинировать с фабрикой стратегий или использовать ленивую загрузку/кеширование.
+- При использовании в многопоточном окружении убедитесь, что выбранная стратегия либо потокобезопасна, либо создавайте отдельный экземпляр стратегии для каждого потока.
+- Часто удобно передавать стратегии через конструктор контекста (injection) или управлять ими через DI-контейнер.
 
-**Когда применять:**
-- Когда поведение объекта зависит от его состояния.
-- Когда необходимо легко расширять систему новыми состояниями.
+---
+
+# Паттерн «Состояние» — кратко и с примером на Java
+
+Ниже — сжатое и упорядоченное описание паттерна «Состояние», его принципа работы, когда применять, плюсы/минусы, и **полный** пример на Java с подробными комментариями. Комментарии в коде сохранены и отражают идеи из исходного описания.
+
+---
+
+# Описание (основные моменты)
+Состояние (State) — поведенческий паттерн, который позволяет объектам менять поведение в зависимости от своего внутреннего состояния. Создаётся впечатление, что класс объекта изменился: поведение делегируется дочерним объектам‑состояниям.
+
+Ключевая идея: вынести поведение, зависящее от состояний, в отдельные классы‑состояния; контекст хранит ссылку на текущее состояние и делегирует ему соответствующие вызовы. Состояния и контекст могут знать друг о друге и инициировать переходы.
+
+---
+
+# Принцип работы
+1. Определён общий интерфейс состояний (например, `State` с методами для действий контекста).
+2. Для каждого логического состояния создаётся класс, реализующий этот интерфейс.
+3. Контекст содержит ссылку на текущее состояние и делегирует ему обработку входящих событий/вызовов.
+4. Конкретные состояния могут вызывать `changeState` у контекста, инициируя переходы между состояниями.
+5. Изменение поведения достигается заменой объекта‑состояния в контексте.
+
+---
+
+# Когда применять (Применимость)
+- Когда поведение объекта кардинально меняется в зависимости от внутренних состояний.
+- Когда в коде много крупных условных операторов (if/switch), выбирающих поведение по значению поля — их можно вынести в классы состояний.
+- Когда нужно организовать иерархию состояний и уменьшить дублирование.
+- Когда требуется гибко управлять переходами между состояниями (логика переходов может жить в состояниях).
+
+---
+
+# Плюсы
+- Устраняет громоздкие условные операторы и улучшает читаемость.
+- Легче тестировать отдельные состояния.
+- Позволяет добавлять новые состояния без изменения контекста и других состояний (локализация изменений).
+- Состояния могут иметь собственные поля и методы, связанные только с этим состоянием.
+
+# Минусы
+- Приводит к увеличению числа классов.
+- Может усложнить код из‑за распределения логики по множеству объектов.
+- При неправильной организации переходов можно запутать логику — надо документировать возможные переходы.
+
+---
+
+# Пример: музыкальный плеер (Java)
+
+Пример демонстрирует, как UI‑действия делегируются разным объектам‑состояниям (Locked, Ready, Playing), а сами состояния могут менять состояние контекста.
 
 ```java
-import lombok.extern.slf4j.Slf4j;
+/**
+ * Общий интерфейс всех состояний.
+ */
+abstract class State {
+    // Контекст, с которым связано состояние (проигрыватель).
+    protected AudioPlayer player;
 
-// Интерфейс состояния
-@Slf4j
-interface State {
-    void handle();
+    /**
+     * Контекст передаёт себя в конструктор состояния, чтобы
+     * состояние могло обращаться к его данным и методам в
+     * будущем, если потребуется.
+     */
+    public State(AudioPlayer player) {
+        this.player = player;
+    }
+
+    public abstract void clickLock();
+    public abstract void clickPlay();
+    public abstract void clickNext();
+    public abstract void clickPrevious();
 }
 
-// Конкретное состояние включенного устройства
-@Slf4j
-class OnState implements State {
+/**
+ * Конкретные состояния реализуют методы абстрактного состояния
+ * по-своему.
+ */
+class LockedState extends State {
+
+    public LockedState(AudioPlayer player) {
+        super(player);
+    }
+
+    /**
+     * При разблокировке проигрывателя с заблокированными
+     * клавишами он может принять одно из двух состояний.
+     */
     @Override
-    public void handle() {
-        log.info("Состояние ON: устройство работает");
+    public void clickLock() {
+        if (player.isPlaying()) {
+            player.changeState(new PlayingState(player));
+        } else {
+            player.changeState(new ReadyState(player));
+        }
+    }
+
+    @Override
+    public void clickPlay() {
+        // Ничего не делать.
+    }
+
+    @Override
+    public void clickNext() {
+        // Ничего не делать.
+    }
+
+    @Override
+    public void clickPrevious() {
+        // Ничего не делать.
     }
 }
 
-// Конкретное состояние выключенного устройства
-@Slf4j
-class OffState implements State {
+class ReadyState extends State {
+    public ReadyState(AudioPlayer player) {
+        super(player);
+    }
+
     @Override
-    public void handle() {
-        log.info("Состояние OFF: устройство выключено");
+    public void clickLock() {
+        player.changeState(new LockedState(player));
+    }
+
+    @Override
+    public void clickPlay() {
+        player.startPlayback();
+        player.changeState(new PlayingState(player));
+    }
+
+    @Override
+    public void clickNext() {
+        player.nextSong();
+    }
+
+    @Override
+    public void clickPrevious() {
+        player.previousSong();
     }
 }
 
-// Контекст, который меняет состояния
-@Slf4j
-class Device {
+class PlayingState extends State {
+    public PlayingState(AudioPlayer player) {
+        super(player);
+    }
+
+    @Override
+    public void clickLock() {
+        player.changeState(new LockedState(player));
+    }
+
+    @Override
+    public void clickPlay() {
+        player.stopPlayback();
+        player.changeState(new ReadyState(player));
+    }
+
+    @Override
+    public void clickNext() {
+        // В реальном коде можно проверять, был ли двойной клик
+        // Здесь просто симулируем поведение.
+        player.nextSong();
+    }
+
+    @Override
+    public void clickPrevious() {
+        player.previousSong();
+    }
+}
+
+/**
+ * Проигрыватель выступает в роли контекста.
+ */
+class AudioPlayer {
     private State state;
+    // Поля контекста: UI, громкость, плейлист, текущий трек и т.д.
+    private boolean playing;
+    private int currentSongIndex;
+    private String[] playlist;
 
-    public void setState(State state) {
-        this.state = state; // изменение текущего состояния
+    public AudioPlayer() {
+        // Изначальное состояние — готовность к воспроизведению.
+        this.state = new ReadyState(this);
+        this.playing = false;
+        this.currentSongIndex = 0;
+        this.playlist = new String[] {"Song A", "Song B", "Song C"};
+
+        // Контекст заставляет состояние реагировать на
+        // пользовательский ввод вместо себя. Реакция может быть
+        // разной, в зависимости от того, какое состояние сейчас
+        // активно.
+        // Для демонстрации мы не реализуем настоящую UI‑связку,
+        // а вызовем методы напрямую в main.
     }
 
-    public void request() {
-        state.handle(); // делегирование поведения текущему состоянию
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Device device = new Device();
-        device.setState(new OnState());
-        device.request(); // устройство работает
-        device.setState(new OffState());
-        device.request(); // устройство выключено
-    }
-}
-```
-
----
-
-## 8. Visitor (Посетитель)
-**Описание:** Паттерн Visitor позволяет добавлять новые операции для группы объектов, не изменяя их классы. Он отделяет алгоритмы от объектов, над которыми эти алгоритмы выполняются. Это особенно полезно для сложных иерархий, где часто добавляются новые операции. Паттерн делает код более открытым к расширению и закрытым к модификации. Он упрощает поддержку и тестирование различных операций.
-
-**Плюсы:**
-- Легко добавлять новые операции.
-- Подходит для сложных структур объектов.
-- Снижает связность между классами элементов и операциями.
-
-**Минусы:**
-- Трудно добавлять новые типы элементов.
-- Требуется строгая структура иерархии.
-
-**Когда применять:**
-- Когда нужно выполнять разные операции над объектами сложной структуры.
-- Когда операции часто меняются или добавляются.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-
-// Интерфейс посетителя
-@Slf4j
-interface Visitor {
-    void visit(Book book);
-    void visit(CD cd);
-}
-
-// Конкретный посетитель для вывода цены
-@Slf4j
-class PriceVisitor implements Visitor {
-    @Override
-    public void visit(Book book) {
-        log.info("Цена книги: {}", book.getPrice());
-    }
-
-    @Override
-    public void visit(CD cd) {
-        log.info("Цена CD: {}", cd.getPrice());
-    }
-}
-
-// Элемент структуры
-@Slf4j
-interface Item {
-    void accept(Visitor visitor);
-}
-
-// Конкретные элементы
-@Slf4j
-class Book implements Item {
-    private int price;
-
-    public Book(int price) {
-        this.price = price;
-    }
-
-    public int getPrice() {
-        return price;
-    }
-
-    @Override
-    public void accept(Visitor visitor) {
-        visitor.visit(this);
-    }
-}
-
-@Slf4j
-class CD implements Item {
-    private int price;
-
-    public CD(int price) {
-        this.price = price;
-    }
-
-    public int getPrice() {
-        return price;
-    }
-
-    @Override
-    public void accept(Visitor visitor) {
-        visitor.visit(this);
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Item[] items = {new Book(100), new CD(200)};
-        Visitor visitor = new PriceVisitor();
-        for (Item item : items) {
-            item.accept(visitor);
-        }
-    }
-}
-```
-
----
-
-## 9. Interpreter (Интерпретатор)
-**Описание:** Паттерн Интерпретатор определяет грамматику простого языка и интерпретирует предложения этого языка. Он позволяет создавать интерпретаторы для специализированных языков и выражений. Паттерн упрощает анализ и обработку выражений, делая код более структурированным. Легко расширять новые правила и синтаксис. Особенно полезен для вычисления, проверки и интерпретации формул или DSL.
-
-**Плюсы:**
-- Легко расширять синтаксис и правила.
-- Четкая структура грамматики.
-
-**Минусы:**
-- Сложность поддержки для сложного языка.
-- Может создавать много небольших классов.
-
-**Когда применять:**
-- Для интерпретации выражений специализированного языка.
-- Для построения компиляторов, парсеров или простых DSL.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-
-// Интерфейс выражения
-@Slf4j
-interface Expression {
-    boolean interpret(String context);
-}
-
-// Конкретное терминальное выражение
-@Slf4j
-class TerminalExpression implements Expression {
-    private String data;
-
-    public TerminalExpression(String data) {
-        this.data = data;
-    }
-
-    @Override
-    public boolean interpret(String context) {
-        return context.contains(data);
-    }
-}
-
-// Операция ИЛИ над выражениями
-@Slf4j
-class OrExpression implements Expression {
-    private Expression expr1;
-    private Expression expr2;
-
-    public OrExpression(Expression expr1, Expression expr2) {
-        this.expr1 = expr1;
-        this.expr2 = expr2;
-    }
-
-    @Override
-    public boolean interpret(String context) {
-        return expr1.interpret(context) || expr2.interpret(context);
-    }
-}
-
-public class Main {
-    public static void main(String[] args) {
-        Expression expr1 = new TerminalExpression("Java");
-        Expression expr2 = new TerminalExpression("Python");
-        Expression orExpression = new OrExpression(expr1, expr2);
-
-        log.info("Результат интерпретации: {}", orExpression.interpret("Java"));
-    }
-}
-```
-
----
-
-## 10. Iterator (Итератор)
-**Описание:** Итератор позволяет последовательно обходить элементы коллекции, не раскрывая её внутреннюю структуру. Паттерн предоставляет единый интерфейс для обхода разных типов коллекций. Он делает код обхода универсальным и повторно используемым. Позволяет реализовать несколько способов обхода для одной коллекции. Упрощает работу с комплексными структурами данных.
-
-**Плюсы:**
-- Универсальный способ обхода.
-- Слабая связка между коллекцией и обходом.
-
-**Минусы:**
-- Дополнительные объекты-итераторы.
-- Могут усложнить код при очень больших коллекциях.
-
-**Когда применять:**
-- Когда требуется последовательный доступ к элементам коллекции.
-- Когда нужно скрыть внутреннюю структуру коллекции.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Iterator;
-
-@Slf4j
-public class Main {
-    public static void main(String[] args) {
-        List<String> list = new ArrayList<>();
-        list.add("A");
-        list.add("B");
-        list.add("C");
-
-       
-
----
-
-## 10. Iterator (Итератор)
-**Описание:** Итератор позволяет последовательно обходить элементы коллекции, не раскрывая её внутреннюю структуру. Он предоставляет единый интерфейс обхода для различных типов коллекций. Это упрощает работу с комплексными структурами данных и делает код более универсальным и повторно используемым. Паттерн поддерживает несколько способов обхода одной коллекции. Он также позволяет безопасно перебирать элементы, не зависимо от внутренней реализации коллекции.
-
-**Плюсы:**
-- Универсальный способ обхода элементов.
-- Слабая связка между коллекцией и обходом.
-- Возможность реализовать разные стратегии обхода.
-
-**Минусы:**
-- Дополнительные объекты-итераторы.
-- Может увеличивать использование памяти при больших коллекциях.
-
-**Когда применять:**
-- Когда требуется последовательный доступ к элементам коллекции.
-- Когда нужно скрыть внутреннюю структуру коллекции.
-
-```java
-import lombok.extern.slf4j.Slf4j;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-
-@Slf4j
-public class Main {
-    public static void main(String[] args) {
-        // Создаем коллекцию элементов
-        List<String> list = new ArrayList<>();
-        list.add("A");
-        list.add("B");
-        list.add("C");
-
-        // Получаем итератор для обхода коллекции
-        Iterator<String> iterator = list.iterator();
-
-        // Проходим по всем элементам, не зная внутренней структуры коллекции
-        while (iterator.hasNext()) {
-            String item = iterator.next();
-            log.info("Элемент коллекции: {}", item); // выводим текущий элемент
-        }
-    }
-}
-```
-
----
-
-## 11. Memento (Хранитель)
-**Описание:** Memento позволяет сохранять и восстанавливать прошлое состояние объекта, не нарушая инкапсуляцию. Это полезно для реализации undo/redo и отката изменений. Хранитель отделяет состояние объекта от его поведения, обеспечивая сохранение истории изменений без вмешательства в код объекта. Паттерн повышает гибкость системы, позволяя легко восстанавливать прежние состояния. Он также упрощает тестирование и откат ошибок в сложных объектах.
-
-**Плюсы:**
-- Сохраняет инкапсуляцию объекта.
-- Позволяет реализовать undo/redo и откат состояний.
-- Упрощает тестирование и управление сложными объектами.
-
-**Минусы:**
-- Может потреблять много памяти при частом сохранении состояний.
-- Требует дополнительного кода для управления хранителями.
-
-**Когда применять:**
-- Когда необходимо сохранять и восстанавливать состояния объектов.
-- При реализации undo/redo и сохранении истории изменений.
-
-```java
-import lombok.Getter;
-import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
-
-// Хранитель, содержащий состояние
-@Slf4j
-@Getter
-class Memento {
-    private final String state;
-
-    public Memento(String state) {
+    /**
+     * Другие объекты тоже должны иметь возможность заменять
+     * состояние проигрывателя.
+     */
+    public void changeState(State state) {
+        System.out.println("[AudioPlayer] Переход в состояние: " + state.getClass().getSimpleName());
         this.state = state;
     }
-}
 
-// Объект, состояние которого нужно сохранять
-@Slf4j
-class Originator {
-    @Setter
-    private String state;
-
-    // Сохраняем текущее состояние
-    public Memento save() {
-        log.info("Сохраняем состояние: {}", state);
-        return new Memento(state);
+    // Методы UI будут делегировать работу активному состоянию.
+    public void clickLock() {
+        state.clickLock();
     }
 
-    // Восстанавливаем предыдущее состояние
-    public void restore(Memento memento) {
-        state = memento.getState();
-        log.info("Восстановлено состояние: {}", state);
+    public void clickPlay() {
+        state.clickPlay();
+    }
+
+    public void clickNext() {
+        state.clickNext();
+    }
+
+    public void clickPrevious() {
+        state.clickPrevious();
+    }
+
+    // Сервисные методы контекста, вызываемые состояниями.
+    public void startPlayback() {
+        System.out.println("[AudioPlayer] Запуск воспроизведения: " + playlist[currentSongIndex]);
+        this.playing = true;
+    }
+
+    public void stopPlayback() {
+        System.out.println("[AudioPlayer] Остановка воспроизведения.");
+        this.playing = false;
+    }
+
+    public void nextSong() {
+        currentSongIndex = (currentSongIndex + 1) % playlist.length;
+        System.out.println("[AudioPlayer] Следующая композиция: " + playlist[currentSongIndex]);
+    }
+
+    public void previousSong() {
+        currentSongIndex = (currentSongIndex - 1 + playlist.length) % playlist.length;
+        System.out.println("[AudioPlayer] Предыдущая композиция: " + playlist[currentSongIndex]);
+    }
+
+    public void fastForward(int seconds) {
+        System.out.println("[AudioPlayer] Перемотка вперёд на " + seconds + " секунд.");
+    }
+
+    public void rewind(int seconds) {
+        System.out.println("[AudioPlayer] Перемотка назад на " + seconds + " секунд.");
+    }
+
+    public boolean isPlaying() {
+        return playing;
     }
 }
 
-@Slf4j
-public class Main {
+/**
+ * Демонстрация использования State-паттерна.
+ */
+public class StateExample {
     public static void main(String[] args) {
-        Originator originator = new Originator();
-        originator.setState("Состояние1");
-        Memento saved = originator.save(); // сохраняем текущее состояние
+        AudioPlayer player = new AudioPlayer();
 
-        originator.setState("Состояние2");
-        log.info("Текущее состояние изменилось: {}", originator.getState());
+        // Нажимаем Play — должны перейти в PlayingState и начать воспроизведение.
+        player.clickPlay();
+        System.out.println();
 
-        originator.restore(saved); // откат к предыдущему состоянию
+        // Нажимаем Lock — при играющем треке перейдём в LockedState.
+        player.clickLock();
+        System.out.println();
+
+        // Нажимаем Lock снова — разблокируем и вернёмся в PlayingState (если играет) или ReadyState.
+        player.clickLock();
+        System.out.println();
+
+        // Нажимаем Next — текущая стратегия обработает команду по‑разному в зависимости от состояния.
+        player.clickNext();
+        System.out.println();
+
+        // Останавливаем воспроизведение через Play (в PlayingState Play останавливает).
+        player.clickPlay();
+        System.out.println();
+
+        // Пытаемся нажать Next в ReadyState — он просто переключит трек.
+        player.clickNext();
     }
 }
+```
+
+---
+
+# Что делает код (коротко)
+- `State` — общий интерфейс (абстрактный класс) для всех состояний.
+- `LockedState`, `ReadyState`, `PlayingState` — конкретные состояния, реализующие поведение для каждого состояния.
+- `AudioPlayer` — контекст, который хранит текущее состояние и делегирует UI‑вызовы текущему состоянию.
+- В примере демонстрируется, как смена состояний меняет реакцию на одни и те же методы (clickPlay, clickNext и т.д.).
+
+---
+
+# Практические замечания
+- Паттерн Состояние часто применяется к конечным автоматам/стейт‑машинам. Убедитесь, что транзиции между состояниями хорошо задокументированы.
+- Состояния могут быть реализованы как одиночки (Singleton), если они не хранят изменяемые данные.
+- Можно комбинировать State с другими паттернами (Factory для создания состояний, Strategy для отдельных алгоритмов внутри состояния).
+- Для сложных машин состояний полезно рисовать диаграммы переходов и тестировать их отдельно.
+
+---
+
+
+# Паттерн «Цепочка обязанностей» — кратко и с примером на Java
+
+Ниже — сжатое и упорядоченное описание паттерна «Цепочка обязанностей» (Chain of Responsibility), его принципа работы, когда применять, плюсы/минусы, и **полный** пример на Java с сохранёнными комментариями из описания.
+
+---
+
+# Описание (основные моменты)
+Цепочка обязанностей (Chain of Responsibility, CoR) — поведенческий паттерн, который позволяет передавать запросы последовательно по цепочке обработчиков. Каждый обработчик решает, может ли он обработать запрос сам и стоит ли передавать запрос дальше по цепи.
+
+Ключевая идея: каждую отдельную проверку/обработчик вынести в отдельный объект и связать эти объекты ссылками «next». Отправляя запрос первому обработчику, вы гарантируете, что он пройдет по всей цепочке, при этом любой обработчик может остановить дальнейшую обработку.
+
+---
+
+# Принцип работы
+1. Определён общий интерфейс обработчика (например, `Handler` или `ComponentWithContextualHelp`).
+2. Каждый конкретный обработчик реализует этот интерфейс и содержит ссылку на следующий обработчик в цепи.
+3. При получении запроса обработчик либо обрабатывает его, либо передаёт следующему (или и то, и другое).
+4. Клиент создаёт цепочку, связывая обработчики, и отправляет запрос первому обработчику.
+5. Цепочку можно настроить динамически: добавлять/удалять/перестраивать звенья.
+
+---
+
+# Когда применять (Применимость)
+- Когда нужно обработать запрос несколькими способами, заранее неизвестно, какой обработчик это сделает.
+- Когда надо выполнить ряд независимых проверок в строгом порядке (например, аутентификация, валидация, throttle, кеш).
+- Когда набор обработчиков должен быть динамическим и конфигурируемым.
+- Когда хочется убрать громоздкие условные операторы и заменить их на гибкую структуру объектов.
+
+---
+
+# Плюсы
+- Позволяет уменьшить связанность между отправителем запроса и получателями.
+- Упрощает добавление новых обработчиков.
+- Позволяет динамически перестраивать цепочки обработки.
+- Обработчики можно переиспользовать в разных цепочках.
+
+# Минусы
+- Невозможно заранее предсказать, какой объект обработает запрос (если требуется — это минус).
+- Длина цепочки может влиять на производительность.
+- Отладка и трассировка пути запроса по цепочке может быть сложнее.
+- Неочевидные побочные эффекты, если обработчики частично изменяют состояние запроса.
+
+---
+
+# Пример: контекстная помощь для UI (Java)
+
+В этом примере реализована цепочка обработки события показа помощи (например, нажатие F1). Компонент запрашивает помощь у себя; если у него нет контекстной помощи, он передаёт запрос контейнеру; контейнеры и диалог могут переопределять показ помощи.
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Интерфейс обработчиков.
+ */
+interface ComponentWithContextualHelp {
+    void showHelp();
+}
+
+/**
+ * Базовый класс простых компонентов.
+ */
+abstract class Component implements ComponentWithContextualHelp {
+    // Текст всплывающей подсказки.
+    protected String tooltipText;
+
+    // Контейнер, содержащий компонент, служит в качестве
+    // следующего звена цепочки.
+    protected Container container;
+
+    public void setTooltipText(String text) {
+        this.tooltipText = text;
+    }
+
+    public void setContainer(Container container) {
+        this.container = container;
+    }
+
+    /**
+     * Базовое поведение компонента заключается в том, чтобы
+     * показать всплывающую подсказку, если для неё задан текст.
+     * В обратном случае — перенаправить запрос своему
+     * контейнеру, если тот существует.
+     */
+    @Override
+    public void showHelp() {
+        if (tooltipText != null) {
+            // Показать подсказку.
+            System.out.println("[Component] Показ подсказки: " + tooltipText);
+        } else if (container != null) {
+            // Передать запрос следующему звену цепочки.
+            System.out.println("[Component] Нет подсказки, передаём контейнеру...");
+            container.showHelp();
+        } else {
+            System.out.println("[Component] Нет подсказки и контейнера, помощи нет.");
+        }
+    }
+}
+
+/**
+ * Контейнеры могут включать в себя как простые компоненты,
+ * так и другие контейнеры. Здесь формируются связи цепочки.
+ */
+abstract class Container extends Component {
+    protected List<Component> children = new ArrayList<>();
+
+    public void add(Component child) {
+        children.add(child);
+        child.setContainer(this);
+    }
+
+    // По умолчанию контейнер использует базовое поведение (проверка tooltipText или передача дальше).
+}
+
+/**
+ * Большинство примитивных компонентов устроит базовое поведение
+ * показа помощи через подсказку, которое они унаследуют из
+ * класса Component.
+ */
+class Button extends Component {
+    private String label;
+
+    public Button(String label) {
+        this.label = label;
+    }
+
+    // Можно оставить поведение showHelp как у родителя.
+}
+
+/**
+ * Но сложные компоненты могут переопределять метод показа
+ * помощи по-своему. Но и в этом случае они всегда могут
+ * вернуться к базовой реализации, вызвав метод родителя.
+ */
+class Panel extends Container {
+    // Модальное окно помощи — высший приоритет для этой панели.
+    protected String modalHelpText;
+
+    public Panel() {
+    }
+
+    public void setModalHelpText(String text) {
+        this.modalHelpText = text;
+    }
+
+    @Override
+    public void showHelp() {
+        if (modalHelpText != null) {
+            // Показать модальное окно с помощью.
+            System.out.println("[Panel] Показ модальной помощи: " + modalHelpText);
+        } else {
+            // Вернуться к базовому поведению (tooltip или container).
+            super.showHelp();
+        }
+    }
+}
+
+/**
+ * Dialog — контейнер верхнего уровня.
+ */
+class Dialog extends Container {
+    protected String wikiPageURL;
+
+    public Dialog(String title) {
+        // title не используется в демонстрации, но в реальном UI может быть нужен.
+    }
+
+    public void setWikiPageURL(String url) {
+        this.wikiPageURL = url;
+    }
+
+    @Override
+    public void showHelp() {
+        if (wikiPageURL != null) {
+            // Открыть страницу Wiki в браузере.
+            System.out.println("[Dialog] Открыть Wiki-страницу: " + wikiPageURL);
+        } else {
+            super.showHelp();
+        }
+    }
+}
+
+/**
+ * Клиентский код.
+ */
+public class ChainOfResponsibilityExample {
+    public static void main(String[] args) {
+        // Каждое приложение конфигурирует цепочку по-своему.
+        Dialog dialog = new Dialog("Budget Reports");
+        dialog.setWikiPageURL("http://example.com/wiki/budget-reports");
+
+        Panel panel = new Panel();
+        panel.setModalHelpText("This panel does complex things...");
+
+        Button ok = new Button("OK");
+        ok.setTooltipText("This is an OK button that submits data.");
+
+        Button cancel = new Button("Cancel");
+        // cancel.tooltipText == null
+
+        panel.add(ok);
+        panel.add(cancel);
+        dialog.add(panel);
+
+        // Представьте, что здесь произойдёт: пользователь нажал F1 на кнопке Cancel
+        ComponentWithContextualHelp componentUnderMouse = cancel;
+        System.out.println("=== Нажатие F1 на Cancel ===");
+        componentUnderMouse.showHelp();
+
+        System.out.println();
+
+        // Если нажали F1 на ок — подсказка показывается прямо на кнопке.
+        System.out.println("=== Нажатие F1 на OK ===");
+        ok.showHelp();
+
+        System.out.println();
+
+        // Если компонент не имеет подсказки и контейнеры не дают помощи — обратиться к диалогу.
+        System.out.println("=== Нажатие F1 на панель (вручную) ===");
+        panel.showHelp();
+    }
+}
+```
+
+---
+
+# Что делает код (коротко)
+- `ComponentWithContextualHelp` — интерфейс обработчика.
+- `Component` — базовый компонент с поведением: показать tooltip или передать запрос контейнеру.
+- `Container`, `Panel`, `Dialog` — контейнеры, составляющие цепочку; `Panel` и `Dialog` могут переопределять поведение помощи.
+- Клиент создаёт и связывает компоненты в иерархию (цепочку) и вызывает `showHelp()` у интересующего компонента — запрос пройдет по цепочке до момента, пока кто-то не обработает его.
+
+---
+
+# Практические замечания
+- Обработчики должны иметь единый интерфейс, чтобы цепочки могли быть гибкими.
+- Можно реализовать базовый класс обработчика, который хранит ссылку на `next` и обеспечивает шаблонный код переадресации.
+- Цепочку можно формировать динамически (runtime) и использовать одни и те же обработчики в разных цепочках.
+- В сценариях с высокими требованиями к производительности следите за длиной цепочки и потенциальными задержками.
+
+---
+
+
+
+---
+
+# Что делает код (коротко)
+- `ThirdPartyYouTubeLib` — общий интерфейс для реального сервиса и прокси.
+- `ThirdPartyYouTubeClass` — тяжёлая/сетевая реализация (заглушка).
+- `CachedYouTubeProxy` — виртуальный + кеширующий прокси: лениво создаёт сервис и кеширует результаты для ускорения повторных вызовов.
+- `ProtectionProxy` — прокси, проверяющий права доступа перед делегированием.
+- `YouTubeManager` — клиент, которому без разницы, что находится за интерфейсом — прокси или реальный сервис.
+
+---
+
+# Пару практических замечаний
+- Прокси удобно комбинировать: например, сначала оборачиваем реальный сервис в `CachedYouTubeProxy`, а потом в `ProtectionProxy` (или наоборот), в зависимости от требований.
+- Следите за потокобезопасностью при ленивой инициализации и кешировании (в примере использована простая `synchronized`-методика).
+- Для сетевых/удалённых прокси стоит обработать ошибки сети и предусмотреть retry/таймауты.
+- Прокси не заменяет необходимость в тестах — тестируйте и поведение прокси, и поведение реального сервиса.
+
+---
+
+
 
 
 
