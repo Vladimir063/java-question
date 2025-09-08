@@ -1667,9 +1667,16 @@ class StringProcessor implements Processor<String> {
 
  
 **Пример:**
- `List<? extends Number> numbers = new ArrayList<Integer>(); Number n = numbers.get(0); // можно читать как Number // numbers.add(10); // ошибка, нельзя добавлять элементы ` 
+ `List<? extends Number> numbers = new ArrayList<Integer>(); 
+ Number n = numbers.get(0); // можно читать как Number //
+ numbers.add(10); // ошибка, нельзя добавлять элементы ` 
 **Пример метода:**
- `public double sum(List<? extends Number> list) {     double sum = 0;     for (Number n : list) {         sum += n.doubleValue();     }     return sum; } ` 
+ `public double sum(List<? extends Number> list) {     
+ double sum = 0;    
+ for (Number n : list) {       
+ sum += n.doubleValue();    
+ }     
+ return sum; } ` 
 Метод `sum` может принимать список чисел любого типа, наследуемого от `Number`.
  
 **Когда использовать:**
@@ -1697,9 +1704,15 @@ class StringProcessor implements Processor<String> {
 
  
 **Пример:**
- `List<? super Integer> list = new ArrayList<Number>(); list.add(10); list.add(20); // Integer i = list.get(0); // ошибка, возвращает Object ` 
+ `List<? super Integer> list = new ArrayList<Number>(); 
+ list.add(10); 
+ list.add(20); // 
+ Integer i = list.get(0); // ошибка, возвращает Object ` 
 **Пример метода:**
- `public void addNumbers(List<? super Integer> list) {     list.add(1);     list.add(2); } ` 
+ `public void addNumbers(List<? super Integer> list) {  
+ list.add(1);     
+ list.add(2);
+ } ` 
 Метод `addNumbers` может добавлять `Integer` в любую коллекцию, которая является суперклассом `Integer`.
  
 **Когда использовать:**
@@ -1712,7 +1725,13 @@ class StringProcessor implements Processor<String> {
 
  
 ## 4. Примеры использования всех wildcard
- `List<Integer> integers = Arrays.asList(1, 2, 3); List<Double> doubles = Arrays.asList(1.5, 2.5);  printList(integers); // любой тип printList(doubles);  List<? extends Number> nums = integers; double s = sum(nums);  List<? super Integer> list = new ArrayList<Number>(); addNumbers(list); ` 
+ `List<Integer> integers = Arrays.asList(1, 2, 3); 
+ List<Double> doubles = Arrays.asList(1.5, 2.5); 
+ printList(integers); // любой тип printList(doubles);  
+ List<? extends Number> nums = integers;
+ double s = sum(nums); 
+ List<? super Integer> list = new ArrayList<Number>(); 
+ addNumbers(list); ` 
 Эти примеры показывают разные сценарии использования wildcard в Java Generics.
  
 Скачать Markdown-файл здесь
