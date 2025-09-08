@@ -1617,9 +1617,236 @@ class StringProcessor implements Processor<String> {
 
 # 5) Wildcards `? extends` и `? super`: variance и PECS (Producer Extends, Consumer Super)
 
+Java Generics: Wildcards, Extends, and Super
+
+1. Wildcards ?
+
+В Java Generics символ ? называется wildcard (подстановочный знак). Он представляет неизвестный тип. Wildcards особенно полезны, когда нужно работать с обобщёнными типами, но конкретный тип заранее неизвестен.
+
+Описание:
+
+? позволяет создавать более гибкий код.
+
+Используется в методах и коллекциях для обозначения того, что тип неизвестен, но всё равно можно проводить безопасные операции.
+
+Позволяет передавать объекты разных типов в один и тот же метод, если они удовлетворяют определённым условиям.
+
+
+Пример:
+
+List<?> list = new ArrayList<String>();
+List<?> numbers = new ArrayList<Integer>();
+
+Здесь list и numbers могут быть списками любого типа. Но с ними можно только безопасно читать элементы как объекты Object, а добавлять нельзя.
+
+Пример метода с wildcard:
+
+public void printList(List<?> list) {
+    for (Object obj : list) {
+        System.out.println(obj);
+    }
+}
+
+Метод printList может принимать любой тип списка.
+
+Когда использовать:
+
+Когда метод только читает данные из коллекции.
+
+Когда важно не привязываться к конкретному типу коллекции.
+
+
+2. extends (Upper Bounded Wildcards)
+
+? extends T используется для ограничения wildcard сверху. Это значит, что неизвестный тип должен быть либо T, либо подклассом T.
+
+Описание:
+
+Используется, когда нужно читать элементы, но не изменять их.
+
+Обеспечивает безопасность типов.
+
+Часто применяется с коллекциями.
+
+
+Пример:
+
+List<? extends Number> numbers = new ArrayList<Integer>();
+Number n = numbers.get(0); // можно читать как Number
+// numbers.add(10); // ошибка, нельзя добавлять элементы
+
+Пример метода:
+
+public double sum(List<? extends Number> list) {
+    double sum = 0;
+    for (Number n : list) {
+        sum += n.doubleValue();
+    }
+    return sum;
+}
+
+Метод sum может принимать список чисел любого типа, наследуемого от Number.
+
+Когда использовать:
+
+Когда метод должен только читать данные.
+
+Когда важно ограничить тип сверху.
+
+
+3. super (Lower Bounded Wildcards)
+
+? super T используется для ограничения wildcard снизу. Это значит, что неизвестный тип должен быть либо T, либо суперклассом T.
+
+Описание:
+
+Используется, когда нужно записывать элементы в коллекцию.
+
+Позволяет безопасно добавлять элементы типа T или его подклассов.
+
+Чтение элементов возможно только как Object.
+
+
+Пример:
+
+List<? super Integer> list = new ArrayList<Number>();
+list.add(10);
+list.add(20);
+// Integer i = list.get(0); // ошибка, возвращает Object
+
+Пример метода:
+
+public void addNumbers(List<? super Integer> list) {
+    list.add(1);
+    list.add(2);
+}
+
+Метод addNumbers может добавлять Integer в любую коллекцию, которая является суперклассом Integer.
+
+Когда использовать:
+
+Когда нужно записывать данные в коллекцию.
+
+Когда важно ограничить тип снизу.
+
+
+4. Примеры использования всех wildcard
+
+List<Integer> integers = Arrays.asList(1, 2, 3);
+List<Double> doubles = Arrays.asList(1.5, 2.5);
+
+printList(integers); // любой тип
+printList(doubles);
+
+List<? extends Number> nums = integers;
+double s = sum(nums);
+
+List<? super Integer> list = new ArrayList<Number>();
+addNumbers(list);
+
+Эти примеры показывают разные сценарии использования wildcard в Java Generics.
 
 
 
+# Java Generics: Wildcards, Extends, and Super
+ 
+## 1. Wildcards `?`
+ 
+В Java Generics символ `?` называется wildcard (подстановочный знак). Он представляет неизвестный тип. Wildcards особенно полезны, когда нужно работать с обобщёнными типами, но конкретный тип заранее неизвестен.
+ 
+**Описание:**
+ 
+ 
+- `?` позволяет создавать более гибкий код.
+ 
+- Используется в методах и коллекциях для обозначения того, что тип неизвестен, но всё равно можно проводить безопасные операции.
+ 
+- Позволяет передавать объекты разных типов в один и тот же метод, если они удовлетворяют определённым условиям.
+ 
+
+ 
+**Пример:**
+ `List<?> list = new ArrayList<String>(); List<?> numbers = new ArrayList<Integer>(); ` 
+Здесь `list` и `numbers` могут быть списками любого типа. Но с ними можно только безопасно читать элементы как объекты `Object`, а добавлять нельзя.
+ 
+**Пример метода с wildcard:**
+ `public void printList(List<?> list) {     for (Object obj : list) {         System.out.println(obj);     } } ` 
+Метод `printList` может принимать любой тип списка.
+ 
+**Когда использовать:**
+ 
+ 
+- Когда метод только читает данные из коллекции.
+ 
+- Когда важно не привязываться к конкретному типу коллекции.
+ 
+
+ 
+## 2. `extends` (Upper Bounded Wildcards)
+ 
+`? extends T` используется для ограничения wildcard сверху. Это значит, что неизвестный тип должен быть либо `T`, либо подклассом `T`.
+ 
+**Описание:**
+ 
+ 
+- Используется, когда нужно читать элементы, но не изменять их.
+ 
+- Обеспечивает безопасность типов.
+ 
+- Часто применяется с коллекциями.
+ 
+
+ 
+**Пример:**
+ `List<? extends Number> numbers = new ArrayList<Integer>(); Number n = numbers.get(0); // можно читать как Number // numbers.add(10); // ошибка, нельзя добавлять элементы ` 
+**Пример метода:**
+ `public double sum(List<? extends Number> list) {     double sum = 0;     for (Number n : list) {         sum += n.doubleValue();     }     return sum; } ` 
+Метод `sum` может принимать список чисел любого типа, наследуемого от `Number`.
+ 
+**Когда использовать:**
+ 
+ 
+- Когда метод должен только читать данные.
+ 
+- Когда важно ограничить тип сверху.
+ 
+
+ 
+## 3. `super` (Lower Bounded Wildcards)
+ 
+`? super T` используется для ограничения wildcard снизу. Это значит, что неизвестный тип должен быть либо `T`, либо суперклассом `T`.
+ 
+**Описание:**
+ 
+ 
+- Используется, когда нужно записывать элементы в коллекцию.
+ 
+- Позволяет безопасно добавлять элементы типа `T` или его подклассов.
+ 
+- Чтение элементов возможно только как `Object`.
+ 
+
+ 
+**Пример:**
+ `List<? super Integer> list = new ArrayList<Number>(); list.add(10); list.add(20); // Integer i = list.get(0); // ошибка, возвращает Object ` 
+**Пример метода:**
+ `public void addNumbers(List<? super Integer> list) {     list.add(1);     list.add(2); } ` 
+Метод `addNumbers` может добавлять `Integer` в любую коллекцию, которая является суперклассом `Integer`.
+ 
+**Когда использовать:**
+ 
+ 
+- Когда нужно записывать данные в коллекцию.
+ 
+- Когда важно ограничить тип снизу.
+ 
+
+ 
+## 4. Примеры использования всех wildcard
+ `List<Integer> integers = Arrays.asList(1, 2, 3); List<Double> doubles = Arrays.asList(1.5, 2.5);  printList(integers); // любой тип printList(doubles);  List<? extends Number> nums = integers; double s = sum(nums);  List<? super Integer> list = new ArrayList<Number>(); addNumbers(list); ` 
+Эти примеры показывают разные сценарии использования wildcard в Java Generics.
+ 
+Скачать Markdown-файл здесь
 
 
 # 6) Примеры — почему `? extends` запрещает добавление
