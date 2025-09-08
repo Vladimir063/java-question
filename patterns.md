@@ -3108,6 +3108,149 @@ interface TaxService {
 
 ---
 
+# Паттерны мониторинга микросервисов
+
+Мониторинг микросервисов — ключевая часть управления распределёнными системами. Он помогает отслеживать работоспособность сервисов, выявлять узкие места и предотвращать сбои. Для Senior Java разработчика важно понимать как архитектурные паттерны мониторинга, так и инструменты их реализации.
+
+## 1. Основные цели мониторинга
+
+* **Availability (Доступность):** Проверка, что сервис жив и отвечает на запросы.
+* **Performance (Производительность):** Время отклика, throughput, latency.
+* **Reliability (Надёжность):** Количество ошибок, успешные/неуспешные транзакции.
+* **Scalability (Масштабируемость):** Нагрузка, использование ресурсов (CPU, Memory, GC).
+* **Traceability (Трассируемость):** Отслеживание потока запроса через несколько микросервисов.
+
+---
+
+## 2. Типы мониторинга
+
+### 2.1. Health Check (Проверка здоровья)
+
+* **Pattern:** Каждый сервис должен предоставлять endpoint `/health` или `/actuator/health` (Spring Boot).
+* **Цель:** Проверка состояния зависимостей: базы данных, брокеров сообщений, кэшей.
+* **Инструменты:** Spring Boot Actuator, Kubernetes Liveness/Readiness Probes.
+
+```java
+@RestController
+public class HealthController {
+    @GetMapping("/health")
+    public ResponseEntity<String> health() {
+        return ResponseEntity.ok("UP");
+    }
+}
+```
+
+---
+
+### 2.2. Metrics (Метрики)
+
+* **Pattern:** Сбор метрик производительности и состояния приложения.
+
+* **Виды метрик:**
+
+  * **Business metrics:** количество заказов, регистраций, платежей.
+  * **System metrics:** CPU, memory, GC, heap usage.
+  * **Application metrics:** количество запросов, latency, ошибки HTTP.
+
+* **Инструменты:**
+
+  * **Prometheus + Micrometer** (Java): сбор и экспонирование метрик.
+  * **Grafana:** визуализация метрик.
+  * **Dropwizard Metrics:** для кастомных метрик.
+
+```java
+// Пример с Micrometer
+@Autowired
+MeterRegistry registry;
+
+registry.counter("orders.created", "region", "us-east").increment();
+```
+
+---
+
+### 2.3. Distributed Tracing (Распределённая трассировка)
+
+* **Pattern:** Каждый запрос получает уникальный traceId, который проходит через все сервисы.
+* **Цель:** Отслеживание причин медленных ответов, поиск узких мест.
+* **Инструменты:**
+
+  * OpenTelemetry
+  * Jaeger
+  * Zipkin
+
+```java
+// Пример Spring Boot + Sleuth
+@Bean
+public Sampler defaultSampler() {
+    return Sampler.ALWAYS_SAMPLE;
+}
+```
+
+---
+
+### 2.4. Logging (Логирование)
+
+* **Pattern:** Централизованное логирование для анализа событий и ошибок.
+
+* **Best Practices:**
+
+  * Структурированные логи (JSON)
+  * Включение `traceId` для корреляции запросов
+  * Разделение на уровни: INFO, WARN, ERROR
+
+* **Инструменты:**
+
+  * ELK Stack (Elasticsearch, Logstash, Kibana)
+  * Loki + Grafana
+  * Fluentd
+
+```java
+log.info("Order created with id={}, traceId={}", orderId, traceId);
+```
+
+---
+
+### 2.5. Alerting (Оповещения)
+
+* **Pattern:** Автоматическое уведомление о проблемах в системе.
+* **Методы:**
+
+  * Threshold-based (CPU > 80%)
+  * Anomaly detection (необычные задержки запросов)
+* **Инструменты:** Prometheus Alertmanager, PagerDuty, Opsgenie.
+
+---
+
+### 2.6. Exception & Error Tracking
+
+* **Pattern:** Отслеживание исключений и сбоев в продакшене.
+* **Инструменты:** Sentry, Rollbar, New Relic.
+
+---
+
+## 3. Архитектурные паттерны
+
+| Паттерн                 | Описание                                                                  | Пример инструментов                |
+| ----------------------- | ------------------------------------------------------------------------- | ---------------------------------- |
+| **Sidecar Metrics**     | Сбор метрик через отдельный контейнер рядом с сервисом                    | Prometheus Node Exporter           |
+| **Agent-based**         | Агент внутри JVM или ОС собирает метрики                                  | Micrometer, Dropwizard             |
+| **Push vs Pull**        | Push — сервис сам отправляет метрики; Pull — мониторинг опрашивает сервис | Prometheus (pull), Graphite (push) |
+| **Health Endpoint**     | Каждый сервис имеет `/health` endpoint                                    | Spring Boot Actuator, K8s probes   |
+| **Centralized Logging** | Логи собираются в одном месте                                             | ELK, Loki                          |
+| **Distributed Tracing** | Связь между сервисами по traceId                                          | Jaeger, Zipkin                     |
+
+---
+
+## 4. Best Practices для Senior Java разработчика
+
+1. **Используй Micrometer с Spring Boot Actuator:** единая точка для всех метрик.
+2. **Обеспечь структурированные логи с traceId:** для быстрого дебага.
+3. **Настрой Health Checks на уровне компонентов:** база данных, очереди, кеш.
+4. **Внедри distributed tracing для всех внешних вызовов:** HTTP/gRPC/kafka.
+5. **Алерты должны быть осмысленными:** не перегружать команду ложными тревогами.
+6. **Используй метрики бизнес-логики:** помимо системных метрик, отслеживай критические бизнес события.
+7. **Разделяй метрики по namespace и тегам:** region, instanceId, serviceType.
+8. **Автоматизация мониторинга:** интеграция с CI/CD и инфраструктурой.
 
 
 
