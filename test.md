@@ -84,11 +84,226 @@ __Фикстуры (fixtures)__ - состояние среды тестиров
 ## Для чего в JUnit используется аннотация `@Ignore`?
 `@Ignore` указывает JUnit на необходимость пропустить данный тестовый метод.
 
-[к оглавлению](#Тестирование)
+# Mock vs Spy, JUnit 4 vs JUnit 5 и пирамида тестирования
 
-# Источники
-+ [Википедия](https://ru.wikipedia.org/wiki/Тестирование_программного_обеспечения)
-+ [Хабрахабр](https://habrahabr.ru/post/116372/)
-+ [Интуит](http://www.intuit.ru/department/se/testing/5/2.html)
+Ниже — подробное сравнение **mock** и **spy** (с примерами на Mockito), отличия **JUnit 4** и **JUnit 5**, и объяснение **пирамида тестирования**.
+
+
+---
+## 1) Чем `mock` отличается от `spy` (с примерами)
+
+### Ключевая идея
+- **Mock** — полностью искусственный (фальшивый) объект: все методы по умолчанию ничего не делают или возвращают значения, которые вы настраиваете. Реальная логика объекта **не выполняется**, пока вы явно не пропишите поведение через `when(...).thenReturn(...)` или `doReturn(...).when(...)`.
+- **Spy** — обёртка над реальным объектом (partial mock). По умолчанию вызывает реальные методы объекта. Вы **можете** подменить поведение отдельных методов (частичное мокирование). Спаи полезны, когда хочется протестировать взаимодействие с реальным поведением, но подменить несколько методов.
+
+### Почему важно выбирать правильно
+- `mock` безопасен: он не выполняет реальную логику (нет побочных эффектов), удобен для unit-тестов, где тестируемая единица должна получать контролируемые ответы от зависимостей.
+- `spy` опаснее: если вы сделаете `when(spy.someMethod())...`, то реальный метод вызовется при настройке (возможно вызовет побочные эффекты). Частичный mock может скрыть баги или привести к хрупким тестам.
+
+### Примеры (Mockito, Java)
+
+#### Mock — пример
+```java
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+import org.junit.Test;
+import java.util.List;
+
+public class MockExample {
+    @Test
+    public void testMock() {
+        List<String> mockList = mock(ArrayList.class);
+
+        when(mockList.size()).thenReturn(5);
+
+        mockList.add("one"); // вызов не выполняет реальную логику ArrayList.add
+        verify(mockList).add("one");
+
+        assertEquals(5, mockList.size()); // возвращает подставленное значение
+    }
+}
+```
+
+Характерно: `mockList.add("one")` ничего не добавляет в реальный список, размер не меняется по реальной логике — он просто возвращает то, что мы запрограммировали.
+
+#### Spy — пример
+```java
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+import org.junit.Test;
+import java.util.ArrayList;
+import java.util.List;
+
+public class SpyExample {
+    @Test
+    public void testSpy() {
+        List<String> realList = new ArrayList<>();
+        List<String> spyList = spy(realList);
+
+        // НЕ делайте так: when(spyList.size()).thenReturn(100);
+        // Это вызовет реальный spyList.size() во время настройки.
+        // Вместо этого используйте doReturn(...).when(...).
+        doReturn(100).when(spyList).size();
+
+        spyList.add("one"); // вызывает реальную логику add
+        verify(spyList).add("one");
+
+        // size() подменён — вернёт 100, хотя реальный список содержит 1 элемент
+        assertEquals(100, spyList.size());
+    }
+}
+```
+
+Особенности со `spy`:
+- По умолчанию реальные методы выполняются (побочные эффекты возможны).
+- Для подмены поведения безопаснее использовать `doReturn(...).when(spy)...` (чтобы не вызвать реальный метод в момент настройки).
+- Spy полезен для частичного подмены и в тех случаях, когда вы хотите проверить взаимодействие с реальной реализацией (например, проверка, что реальный метод `add()` действительно вызывается).
+
+### Когда использовать
+- Используйте **mock**, когда нужна изолированная, детерминированная зависимость без вызова реального кода. Это стандарт для unit-тестов.
+- Используйте **spy** только когда действительно нужно вызвать часть реальной логики и тонко подменить отдельные моменты. И избегайте частичных мока в сложных сценариях, т.к. тесты могут стать хрупкими.
+
+---
+## 2) Отличия JUnit 4 vs JUnit 5 (кратко и с примерами)
+
+JUnit 5 — это новая модульная платформа для тестирования, состоящая из трёх основных частей:
+- **JUnit Platform** — основание, запуск тестов, поддержка разных движков (engines).
+- **JUnit Jupiter** — модуль, содержащий новую модель API (аннотации, Assertions, Extensions).
+- **JUnit Vintage** — движок для запуска старых JUnit 3/4 тестов на платформе JUnit 5.
+
+### Основные отличия и улучшения
+1. **Архитектура / модульность**: JUnit5 разделён на Platform + Jupiter + Vintage. JUnit4 — монолитен.
+2. **Пакеты/аннотации**: JUnit4: `org.junit.*` (`@Test`, `@Before`, `@After`, `@BeforeClass`, `@AfterClass`). JUnit5 (Jupiter): `org.junit.jupiter.api.*` (`@Test`, `@BeforeEach`, `@AfterEach`, `@BeforeAll`, `@AfterAll`, `@Nested`, `@DisplayName`, `@Disabled`).
+3. **Lifecycle methods**: `@BeforeClass/@AfterClass` (JUnit4) → `@BeforeAll/@AfterAll` (JUnit5). В JUnit5 по умолчанию методы `@BeforeAll` должны быть `static`, но можно использовать `@TestInstance(TestInstance.Lifecycle.PER_CLASS)` чтобы сделать их нестатическими.
+4. **Rules vs Extensions**: в JUnit4 были `@Rule` и `TestRule`. В JUnit5 вместо этого — **Extension API** (`@ExtendWith(...)`) с более мощными хуками (пример: `@TempDir`, `TestInfo`, `TestReporter` через DI).
+5. **Runners vs Extensions**: JUnit4 использует `@RunWith(MyRunner.class)`; JUnit5 — `@ExtendWith(...)`/автоматическая интеграция через движки (Spring: `@ExtendWith(SpringExtension.class)` вместо `@RunWith(SpringRunner.class)`).
+6. **Ожидаемые исключения и таймауты**: JUnit4: `@Test(expected = Exception.class)` и `@Test(timeout=1000)`. JUnit5: `assertThrows(...)` и `assertTimeout(...)` или аннотация `@Timeout` — всё более гибко и функционально.
+7. **Параметризованные тесты**: в JUnit4 надо было подключать `@RunWith(Parameterized.class)` и писать сложную конфигурацию. В JUnit5: `@ParameterizedTest` + удобные источники (`@ValueSource`, `@CsvSource`, `@MethodSource`) (в модуле `junit-jupiter-params`).
+8. **Динамические и вложенные тесты**: JUnit5 добавляет `@Nested` (вложенные группы тестов) и `@TestFactory`/`DynamicTest` для генерации тестов во время выполнения.
+9. **Assert API**: схожая функциональность, но JUnit5 предлагает современные `Assertions` и более информативные сообщения; лучше сочетается с Java 8 лямбдами (ленивая генерация сообщений).
+10. **Совместимость**: старые тесты JUnit4 можно запускать под JUnit5 благодаря Vintage engine (при наличии зависимости).
+
+### Примеры
+
+#### Ожидаемое исключение
+JUnit4:
+```java
+import org.junit.Test;
+
+@Test(expected = IllegalArgumentException.class)
+public void testBad() {
+    methodThatThrows();
+}
+```
+
+JUnit5:
+```java
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+
+@Test
+void testBad() {
+    assertThrows(IllegalArgumentException.class, () -> methodThatThrows());
+}
+```
+
+#### Таймаут
+JUnit4:
+```java
+@Test(timeout = 1000)
+public void testTimeout() { ... }
+```
+
+JUnit5:
+```java
+import static java.time.Duration.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+@Test
+void testTimeout() {
+    assertTimeout(ofMillis(1000), () -> {
+        // код
+    });
+}
+```
+
+#### Параметризованный тест (JUnit5)
+```java
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+@ParameterizedTest
+@ValueSource(strings = { "racecar", "radar", "able was I ere I saw elba" })
+void palindromeTest(String candidate) {
+    assertTrue(isPalindrome(candidate));
+}
+```
+
+#### Замена Rules: временная папка
+JUnit4:
+```java
+@Rule
+public TemporaryFolder folder = new TemporaryFolder();
+```
+
+JUnit5:
+```java
+@Test
+void testWithTemp(@TempDir Path tempDir) {
+    // tempDir внедряется автоматически
+}
+```
+
+### Итог по JUnit5
+- Более современная, расширяемая и модульная платформа.  
+- Лучшие возможности для параметризованных/вложенных/динамических тестов.  
+- Расширения вместо правил/раннеров — гибче и безопаснее.  
+- Vintage engine даёт обратную совместимость с JUnit4.
+
+---
+## 3) Что такое пирамида тестирования (Testing Pyramid)
+
+### Краткое определение
+**Пирамида тестирования** — это рекомендация по соотношению типов тестов в проекте, направленная на максимизацию скорости и надёжности: **много быстрых unit-тестов внизу**, меньше интеграционных в середине и ещё меньше end-to-end/GUI тестов вверху.
+
+```
+     [E2E/UI tests]        (мало, медленно, хрупко)
+    -----------------
+    [Integration tests]   (среднее количество, тестируют взаимодействие между компонентами)
+   ----------------------
+   [Unit tests]           (большинство, быстрые, изолированные)
+```
+
+### Почему именно так
+- **Unit-тесты** быстрые, детерминированные, дешёвые в поддержке — их должно быть больше всего.
+- **Integration tests** проверяют взаимодействие между модулями/сервисами/БД — медленнее, дороже, но нужны для проверки контрактов.
+- **End-to-end (E2E)** / UI — тестируют систему как целое; самые медленные и хрупкие, им доверяют меньше (проектирует их по минимуму, чтобы не тратить много времени на поддержку).
+
+### Рекомендации по пропорциям (примерные)
+- Unit : Integration : E2E = **70–80% : 15–25% : 5–10%**  
+  или более строго: **~80 / 15 / 5**.  
+  (Проценты по числу тестов, не по времени выполнения.)
+
+### Что ещё учитывать
+- Не просто количество — ориентируйтесь на **стоимость поддержки** и **время выполнения**. Наличие CI/CD с параллельным запуском может сместить оптимумы.
+- Автоматизируйте Integration тесты, но делайте их детерминированными (чтобы минимизировать флаки). Используйте «in-memory» БД, тестовые контейнеры (Testcontainers) или mock сервисы в зависимости от целей.
+- E2E оставьте для критических сценариев в продовом окружении/похожем на прод. Часто достаточно нескольких ключевых E2E для проверки business flows.
+
+---
+## Полезные советы на практике
+- Предпочитайте `mock` для зависимостей, `spy` — только при явной необходимости.  
+- Переносите временные ресурсы/контекст (файлы, директории) к `@TempDir` или DI-расширениям в JUnit5.  
+- Пишите больше unit-тестов: они дешёвые и быстрые — основа пирамиды.  
+- Используйте JUnit5 (Jupiter) для новых проектов; если у проекта много JUnit4 тестов, можно подключить Vintage и мигрировать поэтапно.  
+
+---
+### Источники и дополнения
+- Mockito docs: разница между `mock()` и `spy()` (см. примечания по `doReturn` против `when` для spy).  
+- JUnit 5 User Guide — подробно про платформу, Jupiter, Vintage и Extension API.  
+
+---
+*Конец документа.*
+
+
 
 [Вопросы для собеседования](README.md)
