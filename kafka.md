@@ -573,7 +573,8 @@ public class KafkaStreamController {
 [к оглавлению](#apache-kafka)
 
 ## Архитектура консюмера
-![Image alt]([https://github.com/Shell26/Java-Developer/raw/master/img/Spring1.png](https://ibm-cloud-architecture.github.io/refarch-eda/technology/kafka-consumers/images/consumer-groups.png))
+![Логотип](./images/consumer-groups.png)
+
 
 Потребители используют **Kafka Consumer API** для взаимодействия с брокерами Kafka. Они получают сообщения и обрабатывают
 их согласно своей логике. Потребители могут быть объединены в группы **Consumer Groups**.
