@@ -1,7 +1,4 @@
-[Свёрстанные вопросы и ответы](book/Java_questions.pdf) [by Victoria Demidova](https://github.com/VictoriaDemidova)  
-[Telegram Bot](https://web.telegram.org/#/im?p=@DevInterviewBot) [by cmmttd](https://github.com/cmmttd)
 
-# Вопросы для собеседования на Java Developer
 
 + [ООП](#ООП) ![icon][done]
 + [JVM](#jvm) ![icon][done]
@@ -822,21 +819,5 @@
 * [В чем разница между Kafka и Flume?](kafka.md#в-чем-разница-между-kafka-и-flume)
 * [В чем разница между Kafka и RabbitMQ?](kafka.md#в-чем-разница-между-kafka-и-rabbitmq)
 
-[к оглавлению](#Вопросы-для-собеседования-на-java-developer)
 
-## Дополнительные материалы
-+ [4 толковых канала на Youtube про технические собеседования](https://habr.com/ru/post/454264/)
-+ [A list of fancy questions I've been asked during the interviews I had](https://github.com/d1mnewz/interviews)
-+ [Job interview in English: как готовиться и что отвечать](https://dou.ua/lenta/articles/interview-in-english/)
-+ [Senior Engineer в поисках работы. О задачах на технических собеседованиях и теоретических вопросах](https://habr.com/ru/post/442442/)
-+ [What to ask an interviewer during a tech interview](https://hackernoon.com/what-to-ask-an-interviewer-during-a-tech-interview-865a293e548c)
-+ [Spring Boot Interview Questions](https://www.baeldung.com/spring-boot-interview-questions)
-+ [Top Spring Framework Interview Questions](https://www.baeldung.com/spring-interview-questions)
-+ [Spring Interview Questions](https://www.interviewbit.com/spring-interview-questions/)
-+ [Hibernate Interview Questions](https://www.adaface.com/blog/hibernate-interview-questions/)
-+ [Java Interview Questions](https://labex.io/interview-questions/java)
 
-[к оглавлению](#Вопросы-для-собеседования-на-java-developer)
-
-## Источники
-+ [Вопросы на собеседование Junior Java Developer](https://jsehelper.blogspot.ru)
