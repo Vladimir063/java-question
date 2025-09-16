@@ -1931,7 +1931,167 @@ public class StateExample {
 
 
 
-## Пример: контекстная помощь для UI (Java)
+## Пример: 
+/**
+ * Простой пример реализации паттерна "Цепочка ответственности" (Chain of Responsibility) на Java.
+ *
+ * Вся логика находится в одном файле для удобства демонстрации:
+ * - Request — объект запроса, который обрабатывается цепочкой.
+ * - Handler — абстрактный обработчик, задаёт интерфейс и ссылку на следующий обработчик.
+ * - ConcreteHandlerX — конкретные обработчики с различными условиями обработки.
+ * - main — пример составления цепочки и отправки нескольких запросов.
+ *
+ * Комментарии внутри кода объясняют ключевые моменты паттерна.
+ */
+public class ChainOfResponsibilityDemo {
+
+    /**
+     * Простой объект запроса: содержит уровень (тип) и описание.
+     * В реальной задаче это может быть HTTP-запрос, событие GUI, лог-сообщение и т.п.
+     */
+    static class Request {
+        public final int level;     // уровень важности или тип запроса
+        public final String text;   // текст/данные запроса
+
+        public Request(int level, String text) {
+            this.level = level;
+            this.text = text;
+        }
+    }
+
+    /**
+     * Абстрактный обработчик в цепочке.
+     * Каждому обработчику можно установить "next" — следующего в цепи.
+     * Метод handle реализуют подклассы: либо обрабатывают запрос, либо передают дальше.
+     */
+    static abstract class Handler {
+        private Handler next; // следующая ссылка в цепочке
+
+        /**
+         * Установка следующего обработчика. Возвращаем сам next для удобного
+         * построения цепочки через цепочку вызовов (fluent-style).
+         */
+        public Handler setNext(Handler next) {
+            this.next = next;
+            return next;
+        }
+
+        /**
+         * Точка входа для обработки запроса.
+         * Подклассы должны реализовать конкретную логику.
+         */
+        public abstract void handle(Request request);
+
+        /**
+         * Утилитный метод: передать запрос следующему обработчику, если он есть.
+         * Это стандартный механизм "передай дальше, если не можешь обработать".
+         */
+        protected void passToNext(Request request) {
+            if (next != null) {
+                next.handle(request);
+            } else {
+                // Если дошли до конца цепи и никто не обработал запрос — можно логировать или бросить исключение.
+                System.out.println("Request was not handled: " + request.text + " (level " + request.level + ")");
+            }
+        }
+    }
+
+    /**
+     * Конкретный обработчик, который обрабатывает запросы с уровнем <= 1.
+     * Демонстрирует: обработчик может полностью "поглотить" запрос (не передавать дальше).
+     */
+    static class LowLevelHandler extends Handler {
+        @Override
+        public void handle(Request request) {
+            if (request.level <= 1) {
+                System.out.println("[LowLevelHandler] handled: " + request.text + " (level " + request.level + ")");
+                // Обработка завершена — НЕ передаём дальше.
+            } else {
+                // Не подходит по условию — передаём дальше по цепочке.
+                System.out.println("[LowLevelHandler] can't handle level " + request.level + ", passing on.");
+                passToNext(request);
+            }
+        }
+    }
+
+    /**
+     * Обработчик среднего уровня: обрабатывает уровень 2.
+     * Показывает условие более специфического обработчика.
+     */
+    static class MidLevelHandler extends Handler {
+        @Override
+        public void handle(Request request) {
+            if (request.level == 2) {
+                System.out.println("[MidLevelHandler] handled: " + request.text + " (level " + request.level + ")");
+            } else {
+                System.out.println("[MidLevelHandler] can't handle level " + request.level + ", passing on.");
+                passToNext(request);
+            }
+        }
+    }
+
+    /**
+     * Высокоуровневый обработчик: обрабатывает уровень >= 3.
+     * Если обработчик решит, он может частично обработать запрос и всё равно передать дальше,
+     * но в этой демонстрации он завершает обработку.
+     */
+    static class HighLevelHandler extends Handler {
+        @Override
+        public void handle(Request request) {
+            if (request.level >= 3) {
+                System.out.println("[HighLevelHandler] handled: " + request.text + " (level " + request.level + ")");
+            } else {
+                System.out.println("[HighLevelHandler] can't handle level " + request.level + ", passing on.");
+                passToNext(request);
+            }
+        }
+    }
+
+    /**
+     * Пример использования: строим цепочку обработчиков и отправляем ей несколько запросов.
+     * Обратите внимание:
+     * - Порядок установки next определяет порядок проверки обработчиков.
+     * - Каждый обработчик решает: обработать или передать дальше.
+     */
+    public static void main(String[] args) {
+        // Создаём обработчики
+        Handler low = new LowLevelHandler();
+        Handler mid = new MidLevelHandler();
+        Handler high = new HighLevelHandler();
+
+        // Строим цепочку: low -> mid -> high
+        low.setNext(mid).setNext(high);
+
+        // Примеры запросов разного уровня
+        Request[] requests = new Request[] {
+            new Request(1, "User login attempt"),
+            new Request(2, "Update profile data"),
+            new Request(3, "Payment processing"),
+            new Request(5, "Critical system alert"),
+            new Request(0, "Minor cache refresh"),
+            new Request(42, "Unknown super-critical event")
+        };
+
+        // Отправляем каждый запрос в начало цепочки
+        for (Request req : requests) {
+            System.out.println("\nSending request: \"" + req.text + "\" with level " + req.level);
+            low.handle(req);
+        }
+
+        /*
+         * Ожидаемый вывод (упрощённо):
+         * - Уровни 0..1 обработает LowLevelHandler.
+         * - Уровень 2 обработает MidLevelHandler.
+         * - Уровни >=3 обработает HighLevelHandler.
+         * - Если бы не было соответствующего обработчика, запрос дошёл бы до конца цепи и был бы помечен как не обработанный.
+         *
+         * Замечания и вариации:
+         * - Обработчики могут частично обрабатывать запрос и затем передавать дальше (например, логирование -> валидация -> исполнение).
+         * - Можно реализовать приоритеты, динамическое изменение цепочки, или хранить список обработчиков вместо единой ссылки next.
+         * - Паттерн удобен, когда нужно разделить логику обработки по ответственностям и сделать добавление новых обработчиков простым.
+         */
+    }
+}
 
 В этом примере реализована цепочка обработки события показа помощи (например, нажатие F1). Компонент запрашивает помощь у себя; если у него нет контекстной помощи, он передаёт запрос контейнеру; контейнеры и диалог могут переопределять показ помощи.
 
