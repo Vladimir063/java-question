@@ -1078,32 +1078,282 @@ HQL преобразуется Hibernate в SQL, учитывая маппинг
 ---
 
 ## 10. Как Hibernate реализует отображение (mapping) наследования?
-**Ответ:**  
-Hibernate (и JPA) поддерживают несколько стратегий маппинга наследования, которые определяются аннотацией `@Inheritance`:
+В JPA/Hibernate есть несколько способов отобразить иерархию классов в реляционную БД. Каждый имеет свои особенности, преимущества и недостатки. Ниже — подробное описание **всех основных стратегий**, примеры кода, сгенерированные DDL/SQL-примеры, а также рекомендации по выбору.
 
-1. **SINGLE_TABLE** — все классы и поля всей иерархии хранятся в одной таблице с дискриминаторным столбцом. Плюсы: быстро; Минусы: много `NULL` полей.
+---
+
+## Краткий список стратегий
+- `SINGLE_TABLE` — все классы иерархии в **одной таблице** (по умолчанию в JPA).  
+- `JOINED` — каждый класс в **своей таблице**, подклассы соединяются `JOIN`'ами.  
+- `TABLE_PER_CLASS` — **каждый конкретный класс** имеет свою таблицу (полей базового класса дублируются).  
+- Кроме этого полезно знать про `@MappedSuperclass` (не сущность, но позволяет разделять маппинг) и `@Embeddable` (встраиваемые значения) — это не стратегии наследования, но часто используются как альтернативы.
+
+---
+
+# Общие аннотации
+- `@Inheritance(strategy = InheritanceType.<...>)` — указывает стратегию на классе-родителе.  
+- `@DiscriminatorColumn` и `@DiscriminatorValue` — используются в `SINGLE_TABLE` (и допустимы в `JOINED`) для хранения типа сущности.  
+- По умолчанию, если `@Inheritance` не указана, JPA использует `SINGLE_TABLE`.
+
+---
+
+## 1) SINGLE_TABLE
+
+### Идея
+Вся иерархия хранится в **одной таблице**. Для полей, специфичных для подклассов, используются `NULL`-значения в строках других типов. Тип записи отмечается колонкой-дискриминатором.
+
+### Аннотации (пример)
 ```java
 @Entity
 @Inheritance(strategy = InheritanceType.SINGLE_TABLE)
-@DiscriminatorColumn(name = "dtype")
-public abstract class Person { ... }
+@DiscriminatorColumn(name = "dtype", discriminatorType = DiscriminatorType.STRING)
+public abstract class Pet {
+    @Id @GeneratedValue
+    private Long id;
+    private String name;
+}
+
+@Entity
+@DiscriminatorValue("DOG")
+public class Dog extends Pet {
+    private int barkVolume;
+}
+
+@Entity
+@DiscriminatorValue("CAT")
+public class Cat extends Pet {
+    private boolean indoor;
+}
 ```
 
-2. **JOINED** — общие поля в таблице базового класса, а специфичные — в таблицах подклассов, соединяемых по ключу. Плюсы: нормализовано; Минусы: JOIN'ы при выборке.
+### Пример DDL (упрощённо)
+```sql
+CREATE TABLE pet (
+  id BIGINT PRIMARY KEY,
+  name VARCHAR(255),
+  dtype VARCHAR(31),
+  barkVolume INTEGER,
+  indoor BOOLEAN
+);
+```
+
+### Пример INSERT/SELECT
+- `INSERT` для собаки: `INSERT INTO pet (name, dtype, barkVolume) VALUES ('Rex','DOG', 10);`
+- `SELECT` для `Pet`: `SELECT * FROM pet WHERE name = ?;` — Hibernate добавит фильтр по дискриминатору при выборках конкретного класса.
+
+### Плюсы
+- Быстрые запросы без JOIN'ов.
+- Простая схема (одно место для всех экземпляров).
+- Хранение polymorphic-объектов эффективно для чтения.
+
+### Минусы
+- Множество `NULL`-полей при сильно различающихся подклассах.
+- Потеря строгой нормализации.
+- Большая таблица — возможно падение кеш-попаданий, увеличение IO.
+- Ограничения типов столбцов (если подклассы используют одинаковые имена полей разных типов).
+
+### Когда выбирать
+- Когда подклассы имеют мало дополнительных полей или часто читаются вместе.
+- Когда важна скорость чтения и простота схемы.
+
+---
+
+## 2) JOINED
+
+### Идея
+Базовый (абстрактный) класс хранит общие поля в **своей таблице**. Каждый подкласс хранит свои специфичные поля в отдельной таблице. При загрузке часто используются `JOIN`-ы между таблицами.
+
+### Аннотации (пример)
 ```java
 @Entity
 @Inheritance(strategy = InheritanceType.JOINED)
-public class Person { ... }
+public abstract class Vehicle {
+    @Id @GeneratedValue
+    private Long id;
+    private String manufacturer;
+}
+
+@Entity
+public class Car extends Vehicle {
+    private int seats;
+}
+
+@Entity
+public class Truck extends Vehicle {
+    private int capacity;
+}
 ```
 
-3. **TABLE_PER_CLASS** — для каждого класса создаётся отдельная таблица со всеми полями (включая поля базового). Минусы: сложные UNION-запросы при выборке по базовому классу.
+Типично для `JOINED` Hibernate генерирует `PRIMARY KEY` в таблицах подклассов, который также является внешним ключом на таблицу базового класса. Можно уточнить с помощью `@PrimaryKeyJoinColumn`.
+
+### Пример DDL (упрощённо)
+```sql
+CREATE TABLE vehicle (
+  id BIGINT PRIMARY KEY,
+  manufacturer VARCHAR(255)
+);
+
+CREATE TABLE car (
+  id BIGINT PRIMARY KEY,
+  seats INTEGER,
+  FOREIGN KEY (id) REFERENCES vehicle(id)
+);
+
+CREATE TABLE truck (
+  id BIGINT PRIMARY KEY,
+  capacity INTEGER,
+  FOREIGN KEY (id) REFERENCES vehicle(id)
+);
+```
+
+### Пример SELECT (полиморфный запрос)
+Чтобы получить `Vehicle` с полными полями, Hibernate выполнит `LEFT OUTER JOIN`:
+```sql
+SELECT v.*, c.seats, t.capacity
+FROM vehicle v
+LEFT OUTER JOIN car c ON v.id = c.id
+LEFT OUTER JOIN truck t ON v.id = t.id
+WHERE v.manufacturer = ?;
+```
+
+### Плюсы
+- Нормализованная схема — нет множества `NULL`-полей.
+- Чёткая структура таблиц, легко добавлять поля подклассам.
+- Хороша для систем, где целостность данных важнее скорости.
+
+### Минусы
+- JOIN'ы увеличивают стоимость чтения — может быть медленнее.
+- Более сложные SQL-запросы и потенциально худшие планы выполнения.
+- Возможны дополнительные накладные расходы при массовой выборке.
+
+### Когда выбирать
+- Когда нужна нормализация и небольшое количество полей у каждого подкласса.
+- Когда важна консистентность и минимизация пустых столбцов.
+
+---
+
+## 3) TABLE_PER_CLASS
+
+### Идея
+Каждый **конкретный** класс хранится в своей таблице. Поля базового класса дублируются в таблицах подклассов. Запрос полиморфного типа (`SELECT` базового класса) приводит к `UNION`-у по таблицам подклассов.
+
+### Аннотации (пример)
 ```java
 @Entity
 @Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
-public abstract class Person { ... }
+public abstract class Payment {
+    @Id @GeneratedValue
+    private Long id;
+    private BigDecimal amount;
+}
+
+@Entity
+public class CreditCardPayment extends Payment {
+    private String cardNumber;
+}
+
+@Entity
+public class CashPayment extends Payment {
+    private String receivedBy;
+}
 ```
 
-Выбор стратегии зависит от требований к производительности и структуре данных.
+### Пример DDL (упрощённо)
+```sql
+CREATE TABLE credit_card_payment (
+  id BIGINT PRIMARY KEY,
+  amount NUMERIC,
+  cardNumber VARCHAR(255)
+);
+
+CREATE TABLE cash_payment (
+  id BIGINT PRIMARY KEY,
+  amount NUMERIC,
+  receivedBy VARCHAR(255)
+);
+```
+
+### Пример SELECT (полиморфный запрос)
+Hibernate выполнит `UNION`:
+```sql
+SELECT id, amount, cardNumber, NULL as receivedBy FROM credit_card_payment
+UNION ALL
+SELECT id, amount, NULL as cardNumber, receivedBy FROM cash_payment;
+```
+
+### Плюсы
+- Таблицы просты, отражают только конкретные сущности.
+- Нет `NULL`-полей, нет JOIN'ов при выборке конкретного подкласса.
+- Хорошо, если подклассы сильно отличаются по структуре и редко используются в полиморфных запросах.
+
+### Минусы
+- `UNION`-ы при полиморфных запросах — медленно и сложно оптимизируется.
+- Дублирование полей в схеме (не нормализовано).
+- Некоторые генераторы идентификаторов (например `IDENTITY`) могут работать не так гибко с этой стратегией; рекомендуется тщательно тестировать генерацию PK.
+
+### Когда выбирать
+- Когда запросы почти всегда делаются к конкретным подклассам (а не к базовому типу).
+- Когда подклассы очень разные по структуре и дублирование полей приемлемо.
+
+---
+
+## 4) @MappedSuperclass (дополнение)
+`@MappedSuperclass` — это не стратегия наследования в JPA, но часто используется как альтернативный подход для повторного использования маппинга полей.
+
+### Пример
+```java
+@MappedSuperclass
+public abstract class BaseEntity {
+    @Id @GeneratedValue
+    private Long id;
+    private LocalDateTime createdAt;
+}
+
+@Entity
+public class User extends BaseEntity {
+    private String username;
+}
+```
+Классы, помеченные `@MappedSuperclass`, **не** являются сущностями сами по себе и не имеют таблицы. Их поля включаются в таблицы подклассов.
+
+### Когда использовать
+- Когда нужен код/маппинг, общий для нескольких сущностей, но иерархия как сущность не нужна.
+
+---
+
+## Дополнительные замечания и тонкие моменты
+
+### Дискриминатор
+- В `SINGLE_TABLE` дискриминатор (по умолчанию колонка `DTYPE`) хранит значение типа. Без `@DiscriminatorValue` Hibernate использует имя класса.
+- В `JOINED` дискриминатор тоже возможен, но необязателен.
+
+### Генерация идентификаторов
+- `GenerationType.IDENTITY` в сочетании с `TABLE_PER_CLASS` и некоторыми диалектами может вести себя неочевидно: при `TABLE_PER_CLASS` нужно убедиться, что стратегия генерации PK совместима с union-полиморфизмом/объединением таблиц. Часто безопаснее использовать `SEQUENCE` или `TABLE` генераторы (в зависимости от БД).
+
+### Полиморфные запросы и производительность
+- `SINGLE_TABLE` — обычно fastest для полиморфных выборок (нет JOIN/UNION).  
+- `JOINED` — при извлечении полного объекта потребуются JOIN'ы; однако при выборках только полей базового класса можно избежать больших JOIN'ов (Hibernate оптимизирует).  
+- `TABLE_PER_CLASS` — тяжелые `UNION`-запросы, плохо масштабируются при большом числе подклассов.
+
+### Индексация и оптимизация
+- `SINGLE_TABLE`: индекс на дискриминаторе и на часто используемых колонках поможет производительности.  
+- `JOINED`: индексы на колонках-ссылках (PK/FK) важны.  
+- `TABLE_PER_CLASS`: индексы надо создавать в каждой таблице отдельно.
+
+### Lazy/Fetch
+- Поля подклассов при `SINGLE_TABLE` технически находятся в той же строке; ленивую загрузку полей нельзя сделать на уровне колонки — только отношения можно лениво подгружать.  
+- В `JOINED` можно подгружать таблицы через `JOIN` или через отдельные выборки; Hibernate может использовать `outer join` или дополнительные селекты.
+
+### Примеры запросов JPQL
+- `select p from Pet p` — поведение будет разным: `SINGLE_TABLE` — выборка из одной таблицы; `JOINED` — `LEFT JOIN`s; `TABLE_PER_CLASS` — `UNION`-ы.
+
+---
+
+## Рекомендации по выбору (резюме)
+- **SINGLE_TABLE** — выбирать для лучшей производительности чтения и простоты, если подклассы похожи по структуре.  
+- **JOINED** — выбирать для нормализованной схемы, когда важна экономия места и целостность; баланс между нормализацией и производительностью.  
+- **TABLE_PER_CLASS** — выбирать, когда подклассы сильно различаются и запросы в основном по конкретным подклассам; избегать для полиморфных частых выборок.  
+- **@MappedSuperclass** — использовать, если не нужен полиморфизм на уровне сущностей, но нужно повторно использовать маппинг колонок.
 
 ---
 
