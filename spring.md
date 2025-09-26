@@ -183,6 +183,21 @@ https://habr.com/ru/post/222579/
 
 CGLIB (Code Generation Library) - Это библиотека инструментария байтов, используемая во многих средах Java, таких как Hibernate или Spring. Инструментарий байт-кода позволяет манипулировать или создавать классы после фазы компиляции программы.
 
+##  Пример, где нужен `prototype` (кратко)
+Когда нужен новый экземпляр при каждом запросе/использовании, например — сборщик сообщений с внутренним состоянием:
+
+```java
+@Component
+@Scope("prototype")
+public class MessageBuilder {
+    private final StringBuilder buf = new StringBuilder();
+    public void add(String part) { buf.append(part); }
+    public String build() { return buf.toString(); }
+}
+```
+
+Если `MessageBuilder` был singleton и использовался одновременно разными потоками — потребуется синхронизация, а prototype даёт отдельный экземпляр.
+
 __Жизненный цикл бинов:__ 
 + Загрузка описаний бинов, создание графа зависимостей(между бинами)
 + Создание и запуск BeanFactoryPostProcessors
@@ -201,6 +216,8 @@ __Жизненный цикл бинов:__
 Имеется возможность настраивать несколько имлементаций BeanPostProcessor и определить порядок их выполнения. Данный интерфейс работает с экземплярами бинов, а это означает, что Spring IoC создаёт экземпляр бина, а затем BeanPostProcessor с ним работает. ApplicationContext автоматически обнаруживает любые бины, с реализацией BeanPostProcessor и помечает их как “post-processors” для того, чтобы создать их определённым способом.
 
 Интерфейс BeanPostProcessor имеет всего два метода: postProcessBeforeInitialization и postProcessAfterInitialization
+
+
 
 ## Жизненный цикл бинов
 
