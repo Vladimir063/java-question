@@ -477,6 +477,28 @@ optional.ifPresent(s -> System.out.println(s.length())); // 5
 optional.get(); // "hello"
 optional.orElse("ops..."); // "hello"
 ```
+Optional.of():
+Требует обязательного ненулевого значения (non-null).
+При передаче null бросается исключение NullPointerException.
+Удобен, когда уверены, что значение гарантированно присутствует
+```java
+Optional<Integer> opt = Optional.of(10); // OK
+Optional<Integer> optNull = Optional.of(null); // Ошибка: выбрасывает NPE
+```
+
+Optional.ofNullable():
+Может принять как нулевое (null), так и ненулевое значение.
+Возвращает пустой Optional.empty() при значении null.
+Полезен, когда нельзя гарантировать отсутствие null.
+Пример:
+
+```java
+Optional<Integer> optNonNull = Optional.ofNullable(10); // Вернёт Optional с числом 10
+Optional<Integer> optNull = Optional.ofNullable(null); // Вернёт Optional.empty()
+```
+
+Резюме:
+Используйте of() — если уверены, что аргумент не будет null. Используйте ofNullable() — если возможно наличие null.
 
 [к оглавлению](#java-8)
 
