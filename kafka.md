@@ -1494,6 +1494,57 @@ Apache Kafka — это распределённая платформа пото
 - Поточный процесс "consume → produce" использует транзакции: начни транзакцию, прочитай, обработай, отправь новые сообщения, вызови `sendOffsetsToTransaction()` чтобы включить offset-commit в транзакцию, затем `commitTransaction()`. Это гарантирует, что либо всё (включая офсеты) зафиксировано, либо ничего — и при restart не будет дублей.  
 - Ограничения: требует поддержки брокером; сложнее в конфигурации; могут быть производительные и operational costs.
 
+**Что это:** Exactly-once (EOS) — возможность гарантировать, что каждое событие обработается и запишется **ровно один раз** в end-to-end цикле "read-process-write". В Kafka это достигается сочетанием *идемпотентных* продюсеров и транзакций.  
+
+---
+
+## Быстрые шаги для включения EOS
+
+1. **На клиенте (Producer):**
+   - Включить идемпотентность:
+     ```properties
+     enable.idempotence=true
+     ```
+   - Задать уникальный transactional id:
+     ```properties
+     transactional.id=my-producer-1
+     ```
+   - В коде (Java):
+     ```java
+     producer.initTransactions();
+     producer.beginTransaction();
+     // send messages
+     producer.sendOffsetsToTransaction(offsets, consumerGroupMetadata);
+     producer.commitTransaction();
+     // или при ошибке: producer.abortTransaction();
+     ```
+
+2. **На стороне потребителя (Consumer), чтобы не видеть незафиксированные данные:**
+   ```properties
+   isolation.level=read_committed
+   enable.auto.commit=false
+   ```
+
+3. **Для Kafka Streams:** установить `processing.guarantee=exactly_once_v2` в конфигурации приложения Streams (требует соответствующей версии брокера).  
+
+4. **Брокеры/кластеры:** нужно, чтобы внутренняя тема `__transaction_state` была корректно сконфигурирована (подходящий replication.factor и min.insync.replicas), т.к. туда пишется состояние транзакций.
+
+---
+
+## Ограничения и важные предупреждения
+- `rebase` на продюсерах? (опечатка) — нет: основная опасность — неправильно использовать транзакции совместно с внешними системами (БД) — нужно проектировать компенсации/идемпотентность.
+- Rebalance/сбои и неправильная настройка `transaction.state.log.*` могут привести к невозможности работать в EOS или требовать ≥3 брокеров (обычная рекомендация для репликации транзакционного лога).
+- EOS решает дублирование внутри Kafka (чтение — обработка — запись) при условии корректного использования API; оно не автоматически делает внешние системы транзакционными.
+
+---
+
+## Короткие ссылки на документацию
+- Как работают транзакции и EOS в Kafka — Confluent blog / Kafka docs.  
+- Producer API: `initTransactions`, `sendOffsetsToTransaction`, `commitTransaction`.  
+- Streams: `processing.guarantee=exactly_once_v2`.  
+(Ссылки и точные параметры см. в официальной документации.)
+
+
 ---
 
 # 6. Практические параметры продюсера (важные конфиги и зачем они)
