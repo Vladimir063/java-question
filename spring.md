@@ -691,51 +691,76 @@ public String submit(@ModelAttribute("employee") Employee employee) {
 
 
 ## Исключения в Spring MVC
-В Spring MVC интерфейс HandlerExceptionResolver (из пакета org.springframework.web.servlet) предназначен для работы с непредвиденными исключениями, возникающими во время выполнения обработчиков. По умолчанию DispatcherServlet регистрирует класс DefaultHandlerExceptionResolver (из пакета org.springframework.web.servlet.mvc.support). Этот распознаватель обрабатывает определенные стандартные исключения Spring MVC, устанавливая специальный код состояния ответа. Можно также реализовать собственный обработчик исключений, аннотировав метод контроллера с помощью аннотации @ExceptionHandler и передав ей в качестве атрибута тип исключения. 
+# Обработка исключений в Spring MVC
 
-В общем случае обработку исключений можно описать таким образом:
-+ @ExceptionHandler - указать методы для обработки исключения в классе контроллере. Принимает в себя имя класса обрабатываемого исключения (можно несколько).
+В Spring MVC для обработки исключений существует несколько подходов.
 
-| Метод                                                                        | Описание                                                | Пример  |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------- | ------- |
-| `@ExceptionHandler`                                                          | Локальная обработка исключений в конкретном контроллере | ```java |
-| @ExceptionHandler(ResourceNotFoundException.class)                           |                                                         |         |
-| public ResponseEntity<String> handleNotFound(ResourceNotFoundException ex) { |                                                         |         |
+## 1. Использование `@ExceptionHandler`
 
-```
-return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-```
+Аннотация `@ExceptionHandler` позволяет обработать конкретное исключение внутри контроллера или глобально через `@ControllerAdvice`.
 
-}
+```java
+@Controller
+public class MyController {
 
-````|
-| `@ControllerAdvice` | Глобальная обработка исключений для всех контроллеров | ```java
-@ControllerAdvice
-public class GlobalExceptionHandler {
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> handleAll(Exception ex) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error occurred");
+    @GetMapping("/example")
+    public String example() {
+        if (true) {
+            throw new RuntimeException("Что-то пошло не так!");
+        }
+        return "example";
+    }
+
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<String> handleRuntimeException(RuntimeException ex) {
+        return new ResponseEntity<>("Ошибка: " + ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }
-``` |
-| `ResponseStatusException` | Исключение с указанным HTTP статусом | ```java
-throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid input");
-``` |
-| `@ResponseStatus` | Аннотирование собственного исключения HTTP статусом | ```java
-@ResponseStatus(HttpStatus.NOT_FOUND)
-public class ResourceNotFoundException extends RuntimeException {}
-``` |
+```
 
-## Итог
-- Spring MVC позволяет обрабатывать исключения **локально** и **глобально**.
-- Можно возвращать корректный **HTTP статус** и сообщение клиенту.
-- Использование `@ControllerAdvice` и `@ExceptionHandler` — рекомендуемый подход.
+## 2. Глобальная обработка через `@ControllerAdvice`
 
-````
+Позволяет централизованно обрабатывать исключения для всех контроллеров.
 
-  
-+ @ControllerAdvice - для глобальной обработки ошибок в приложении Spring MVC. Ставится над классом-контроллером, отлавливает все исключения с методов. Он также имеет полный контроль над телом ответа и кодом состояния.
-+ HandlerExceptionResolver implementation – позволяет задать глобального обработчика исключений. Реализацию этого интерфейса можно использовать для создания собственных глобальных обработчиков исключений в приложении.
+```java
+@ControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<String> handleRuntimeException(RuntimeException ex) {
+        return new ResponseEntity<>("Глобальная ошибка: " + ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleException(Exception ex) {
+        return new ResponseEntity<>("Общая ошибка: " + ex.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+}
+```
+
+## 3. Использование `ResponseStatusException`
+
+Можно выбросить исключение с конкретным HTTP статусом напрямую:
+
+```java
+@GetMapping("/status")
+public String statusExample() {
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Ресурс не найден");
+}
+```
+
+## 4. Настройка страницы ошибок через `SimpleMappingExceptionResolver`
+
+Используется реже, чаще в старых версиях Spring. Позволяет сопоставлять исключения с определёнными страницами.
+
+---
+
+## Рекомендации
+
+* Используй `@ControllerAdvice` для глобальной обработки, если у тебя много контроллеров.
+* `@ExceptionHandler` подходит для локальной обработки в конкретном контроллере.
+* Для REST API лучше использовать `ResponseEntity` или `ResponseStatusException` для возврата корректных HTTP статусов.
+
 
 ## Локализация в приложениях Spring MVC
 Spring MVC предоставляет очень простую и удобную возможность локализации приложения. Для этого необходимо сделать следующее:
