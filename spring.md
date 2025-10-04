@@ -695,6 +695,45 @@ public String submit(@ModelAttribute("employee") Employee employee) {
 
 В общем случае обработку исключений можно описать таким образом:
 + @ExceptionHandler - указать методы для обработки исключения в классе контроллере. Принимает в себя имя класса обрабатываемого исключения (можно несколько).
+
+| Метод                                                                        | Описание                                                | Пример  |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------- | ------- |
+| `@ExceptionHandler`                                                          | Локальная обработка исключений в конкретном контроллере | ```java |
+| @ExceptionHandler(ResourceNotFoundException.class)                           |                                                         |         |
+| public ResponseEntity<String> handleNotFound(ResourceNotFoundException ex) { |                                                         |         |
+
+```
+return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+```
+
+}
+
+````|
+| `@ControllerAdvice` | Глобальная обработка исключений для всех контроллеров | ```java
+@ControllerAdvice
+public class GlobalExceptionHandler {
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleAll(Exception ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error occurred");
+    }
+}
+``` |
+| `ResponseStatusException` | Исключение с указанным HTTP статусом | ```java
+throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid input");
+``` |
+| `@ResponseStatus` | Аннотирование собственного исключения HTTP статусом | ```java
+@ResponseStatus(HttpStatus.NOT_FOUND)
+public class ResourceNotFoundException extends RuntimeException {}
+``` |
+
+## Итог
+- Spring MVC позволяет обрабатывать исключения **локально** и **глобально**.
+- Можно возвращать корректный **HTTP статус** и сообщение клиенту.
+- Использование `@ControllerAdvice` и `@ExceptionHandler` — рекомендуемый подход.
+
+````
+
+  
 + @ControllerAdvice - для глобальной обработки ошибок в приложении Spring MVC. Ставится над классом-контроллером, отлавливает все исключения с методов. Он также имеет полный контроль над телом ответа и кодом состояния.
 + HandlerExceptionResolver implementation – позволяет задать глобального обработчика исключений. Реализацию этого интерфейса можно использовать для создания собственных глобальных обработчиков исключений в приложении.
 
