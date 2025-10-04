@@ -644,6 +644,27 @@ public void contextDestroyed(ServletContextEvent arg0) {
 }
 ```
 
+# Отличия Interceptor, Filter и Listener в Spring
+
+| Критерий                          | Interceptor                                                               | Filter                                                                 | Listener                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Уровень работы**                | Spring MVC (контроллеры)                                                  | Servlet контейнер (HTTP запросы)                                       | Servlet контейнер или Spring контекст                                                              |
+| **Когда срабатывает**             | До и после вызова контроллера (`preHandle`, `postHandle`)                 | До и после обработки запроса (`doFilter`)                              | При жизненных событиях приложения или сессии (например, startup, shutdown, session create/destroy) |
+| **Доступ к запросу/ответу**       | `HttpServletRequest`, `HttpServletResponse`, модель MVC                   | `ServletRequest`, `ServletResponse`                                    | Зависит от события (`ServletContextEvent`, `HttpSessionEvent`)                                     |
+| **Область действия**              | Spring MVC контроллеры                                                    | Все сервлеты, ресурсы, фильтруемый URL                                 | События жизненного цикла (контекст, сессия, атрибуты)                                              |
+| **Подключение**                   | Через `WebMvcConfigurer#addInterceptors`                                  | Через `@Component` + `@Order` или web.xml                              | Через `@Component` + интерфейс `ApplicationListener` или web.xml                                   |
+| **Основное назначение**           | Логирование, аутентификация, изменение модели, обработка ответов          | Логирование, фильтрация, кэширование, компрессия, CORS                 | Реакция на события жизненного цикла, инициализация ресурсов                                        |
+| **Пример метода**                 | `preHandle()`, `postHandle()`, `afterCompletion()`                        | `doFilter(ServletRequest req, ServletResponse res, FilterChain chain)` | `contextInitialized()`, `sessionCreated()`, `attributeAdded()`                                     |
+| **Влияние на выполнение запроса** | Может остановить выполнение контроллера (возвращая `false` в `preHandle`) | Может прервать цепочку вызова `chain.doFilter()`                       | Не влияет напрямую на обработку запроса                                                            |
+| **Фреймворк зависимость**         | Spring MVC                                                                | Servlet API (вне Spring)                                               | Servlet API или Spring Event API                                                                   |
+
+---
+
+**Итог:**
+
+* **Interceptor** — Spring MVC, до/после контроллера, влияет на модель и обработку.
+* **Filter** — на уровне сервлета, фильтрует HTTP запрос/ответ.
+* **Listener** — реагирует на события жизненного цикла приложения или сессии.
 
 
 ## Связывание форм
