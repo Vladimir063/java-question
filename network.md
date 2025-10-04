@@ -270,3 +270,161 @@ HTTP-методы имеют разные свойства с точки зре�
 Идемпотентность также облегчает интеграцию с кэшированием, прокси-серверами и балансировщиками нагрузки, поскольку эти компоненты могут безопасно повторять или кэшировать запросы, не нарушая бизнес-логику.
 
 
+# WebSocket в Spring Boot
+
+## Что такое WebSocket
+
+**WebSocket** — это протокол, который позволяет устанавливать **двустороннее соединение** между клиентом и сервером.
+
+Особенности:
+
+* Постоянное соединение, в отличие от HTTP-запросов.
+* Сервер может отправлять данные клиенту в любой момент.
+* Идеально подходит для чатов, игр, уведомлений и стриминга данных.
+
+---
+
+## Настройка WebSocket в Spring Boot
+
+### 1. Зависимости
+
+Добавьте в `pom.xml`:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-websocket</artifactId>
+</dependency>
+```
+
+### 2. Конфигурация WebSocket
+
+Создайте класс конфигурации:
+
+```java
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    @Override
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        registry.addEndpoint("/ws")  // URL для подключения WebSocket
+                .setAllowedOriginPatterns("*")  // Разрешаем CORS
+                .withSockJS();  // Поддержка fallback
+    }
+
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        registry.enableSimpleBroker("/topic"); // Простая брокерная шина
+        registry.setApplicationDestinationPrefixes("/app");
+    }
+}
+```
+
+* `/ws` — точка подключения для клиентов.
+* `/app` — префикс для сообщений от клиента к серверу.
+* `/topic` — префикс для сообщений, отправляемых сервером клиентам.
+
+---
+
+## Создание контроллера WebSocket
+
+```java
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.stereotype.Controller;
+
+@Controller
+public class ChatController {
+
+    @MessageMapping("/chat.sendMessage") // Сообщения, отправляемые на /app/chat.sendMessage
+    @SendTo("/topic/public") // Сообщения будут отправлены всем подписчикам /topic/public
+    public ChatMessage sendMessage(ChatMessage message) {
+        return message;
+    }
+}
+
+class ChatMessage {
+    private String content;
+    private String sender;
+
+    // геттеры и сеттеры
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+    public String getSender() { return sender; }
+    public void setSender(String sender) { this.sender = sender; }
+}
+```
+
+* Клиенты отправляют сообщения на `/app/chat.sendMessage`.
+* Все клиенты, подписанные на `/topic/public`, получают сообщение.
+
+---
+
+## Клиентская часть (JavaScript)
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+</head>
+<body>
+    <script>
+        let socket = new SockJS('/ws');
+        let stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, function(frame) {
+            console.log('Connected: ' + frame);
+            stompClient.subscribe('/topic/public', function(message){
+                console.log(JSON.parse(message.body));
+            });
+        });
+
+        function sendMessage() {
+            let chatMessage = {sender: 'User1', content: 'Hello!'};
+            stompClient.send('/app/chat.sendMessage', {}, JSON.stringify(chatMessage));
+        }
+    </script>
+    <button onclick="sendMessage()">Send Message</button>
+</body>
+</html>
+```
+
+* Подключаемся к `/ws` с помощью SockJS и STOMP.
+* Подписываемся на `/topic/public` для получения сообщений.
+* Отправляем сообщения на `/app/chat.sendMessage`.
+
+---
+
+## Применение WebSocket в Spring Boot
+
+* **Чаты и мессенджеры**
+* **Онлайн-игры**
+* **Реальное время на дашбордах**
+* **Уведомления и алерты**
+* **Финансовые приложения (курсы, акции)**
+
+---
+
+## Итог
+
+* WebSocket обеспечивает **двустороннее соединение**.
+* В Spring Boot используется **STOMP поверх SockJS**.
+* Конфигурация через `WebSocketMessageBrokerConfigurer`.
+* Контроллеры обрабатывают сообщения через `@MessageMapping` и `@SendTo`.
+* Клиенты подписываются на топики и отправляют сообщения на префиксы приложения.
+
+---
+
+Это базовая структура, которую можно расширять для любого приложения в реальном времени.
+
+
