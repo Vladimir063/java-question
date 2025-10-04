@@ -2710,6 +2710,61 @@ public class Car extends Vehicle { ... }
 - Производительность улучшилась за счёт уменьшения N+1, правильных индексов и selective caching.  
 - Система стала предсказуемой под нагрузкой.
 
+## 57 @GeneratedValue
+# @GeneratedValue в Hibernate / JPA — кратко
+
+Аннотация **`@GeneratedValue`** указывает, как Hibernate генерирует значение первичного ключа (`@Id`).
+
+## Основные стратегии
+
+| Стратегия | Где используется | Генерирует кто | Batch insert | Особенности |
+|------------|------------------|----------------|---------------|--------------|
+| `AUTO` | Универсальная | Hibernate выбирает сам | Зависит от БД | Безопасно и просто |
+| `IDENTITY` | MySQL, SQL Server | База данных | ❌ Нет | Использует AUTO_INCREMENT |
+| `SEQUENCE` | PostgreSQL, Oracle | Hibernate через sequence | ✅ Да | Быстро и гибко |
+| `TABLE` | Любая БД | Hibernate через таблицу | ❌ Нет | Универсально, но медленно |
+
+## Примеры
+
+### AUTO
+```java
+@Id
+@GeneratedValue(strategy = GenerationType.AUTO)
+private Long id;
+```
+
+### IDENTITY
+```java
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+private Long id;
+```
+
+### SEQUENCE
+```java
+@Id
+@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "user_seq")
+@SequenceGenerator(name = "user_seq", sequenceName = "user_sequence", allocationSize = 1)
+private Long id;
+```
+
+### UUID
+```java
+@Id
+@GeneratedValue(generator = "uuid2")
+@GenericGenerator(name = "uuid2", strategy = "uuid2")
+private String id;
+```
+
+---
+**Итог:**  
+- `AUTO` — универсально  
+- `IDENTITY` — просто, но без batch insert  
+- `SEQUENCE` — оптимально для PostgreSQL/Oracle  
+- `TABLE` — fallback для любых БД  
+
+
+
 
 
 
