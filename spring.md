@@ -869,6 +869,62 @@ View Helper отделяет статическое содержимое в пр
 
 С помощью АОП мы можем прописать, например, что будет выполняться до или после какого-то действия. Прописываем это один раз и этот функционал будет работать везде. Например нам нужно сделать логирование во всех методах @Service, с ООП нам бы пришлось прописывать этот функционал в каждом методе для всех @Service. А с АОП мы можем в конфигах прописать для @Service что будет происходить с каждым вызовом его методов, - в нашем случае писать логи. Элементы АОП такие как аспекты также используются в транзакциях спринга.
 
+# Пример Spring AOP с пояснениями
+
+```java
+// Импортируем нужные аннотации и классы Spring AOP
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.annotation.Before;
+import org.aspectj.lang.annotation.After;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.springframework.stereotype.Component;
+
+// @Component — сообщает Spring, что этот класс является компонентом и должен быть добавлен в контекст приложения
+@Component
+// @Aspect — делает класс аспектом, т.е. содержит методы, которые будут выполняться "вокруг" других методов (вставки кода)
+@Aspect
+public class LoggingAspect {
+
+    // @Before — метод будет вызван до выполнения целевого метода
+    @Before("execution(* com.example.service.*.*(..))") // выражение pointcut: любой метод в пакете com.example.service
+    public void beforeMethod() {
+        System.out.println("Метод скоро выполнится");
+    }
+
+    // @After — метод будет вызван после выполнения целевого метода, независимо от результата
+    @After("execution(* com.example.service.*.*(..))")
+    public void afterMethod() {
+        System.out.println("Метод завершил выполнение");
+    }
+
+    // @Around — позволяет полностью обернуть выполнение метода, выполнять код до и после, изменять результат
+    @Around("execution(* com.example.service.*.*(..))")
+    public Object aroundMethod(ProceedingJoinPoint joinPoint) throws Throwable {
+        System.out.println("До выполнения метода: " + joinPoint.getSignature().getName());
+        
+        // proceed() запускает целевой метод
+        Object result = joinPoint.proceed();
+        
+        System.out.println("После выполнения метода: " + joinPoint.getSignature().getName());
+        return result; // возвращаем результат метода
+    }
+}
+```
+
+### Пояснения
+
+1. **`@Component`** — добавляет аспект в контекст Spring, иначе он не будет применяться.
+2. **`@Aspect`** — делает класс аспектом (Aspect-Oriented Programming).
+3. **Pointcut-выражение `execution(* com.example.service.*.*(..))`**:
+
+   * `*` — любой возвращаемый тип;
+   * `com.example.service.*.*` — любой метод любого класса внутри пакета `com.example.service`;
+   * `(..)` — любые параметры.
+4. **`@Before` / `@After` / `@Around`** — точки вхождения (advice), которые выполняются до, после или вокруг метода.
+5. **`ProceedingJoinPoint`** — позволяет вызвать целевой метод и получить его результат внутри `@Around`.
+
+
 ## Spring AOP vs ASPECTJ
 AspectJ де-факто является стандартом реализации АОП. Реализация АОП от Spring имеет некоторые отличия:
 + Spring AOP немного проще, т.к. нет необходимости следить за процессом связывания.
