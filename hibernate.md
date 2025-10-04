@@ -2711,7 +2711,6 @@ public class Car extends Vehicle { ... }
 - Система стала предсказуемой под нагрузкой.
 
 ## 57 @GeneratedValue
-# @GeneratedValue в Hibernate / JPA — кратко
 
 Аннотация **`@GeneratedValue`** указывает, как Hibernate генерирует значение первичного ключа (`@Id`).
 
