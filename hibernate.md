@@ -2724,44 +2724,14 @@ public class Car extends Vehicle { ... }
 | `SEQUENCE` | PostgreSQL, Oracle | Hibernate через sequence | ✅ Да | Быстро и гибко |
 | `TABLE` | Любая БД | Hibernate через таблицу | ❌ Нет | Универсально, но медленно |
 
-## Примеры
 
-### AUTO
-```java
-@Id
-@GeneratedValue(strategy = GenerationType.AUTO)
-private Long id;
-```
-
-### IDENTITY
-```java
-@Id
-@GeneratedValue(strategy = GenerationType.IDENTITY)
-private Long id;
-```
-
-### SEQUENCE
-```java
-@Id
-@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "user_seq")
-@SequenceGenerator(name = "user_seq", sequenceName = "user_sequence", allocationSize = 1)
-private Long id;
-```
-
-### UUID
-```java
-@Id
-@GeneratedValue(generator = "uuid2")
-@GenericGenerator(name = "uuid2", strategy = "uuid2")
-private String id;
-```
 
 ---
 **Итог:**  
 - `AUTO` — универсально  
-- `IDENTITY` — просто, но без batch insert  
+- `IDENTITY` — просто, но без batch insert   . Использует автоинкремент столбца в базе данных (например, AUTO_INCREMENT в MySQL).
 - `SEQUENCE` — оптимально для PostgreSQL/Oracle  
-- `TABLE` — fallback для любых БД  
+- `TABLE` — fallback для любых БД. Использует вспомогательную таблицу в БД для хранения последнего значения id.  
 
 
 
