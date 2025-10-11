@@ -1,10 +1,4 @@
 
-# Разбор 22 задач для собеседований Senior Java (с исходными кодами)
-Формат по каждой задаче:  
-**1) Задание** · **Исходный код** · **2) Ошибки/риски (подробно)** · **3) Что сделать лучше** · **4) Корректная реализация (пример)**
-
-> Примечание: для первых **20 задач** описания ошибок и улучшений расширены и детализированы.
-
 ---
 
 ## 1) REST + БД + Kafka: создание заказа и публикация события
@@ -1832,5 +1826,766 @@ public class PizzaService {
 }
 ```
 
+
+# Новые 5 задач для собеседования на Java (продолжение: №23–27)
+
+Формат: **1) Задание · Исходный код (с ошибками) · 2) Ошибки/риски · 3) Что улучшить · 4) Корректная реализация**
+
 ---
+
+## 23) Платёж: сохранение + внешний PSP (нужно быстро и надёжно)
+
+### 1) Задание
+Реализовать создание платежа: сохранить в БД и отправить запрос во внешний платёжный провайдер (PSP). Нельзя блокировать HTTP‑поток на долгое ожидание ответа PSP; результат должен быть консистентен (без «записали, но не отправили»).
+
+### Исходный код (с ошибками)
+```java
+@RestController
+@RequestMapping("/payments")
+public class PaymentController {
+
+    @Autowired
+    private PaymentService service;
+
+    @PostMapping
+    public String create(@RequestBody PaymentDto dto) {
+        service.create(dto);
+        return "ok";
+    }
+}
+
+@Service
+public class PaymentService {
+
+    @Autowired
+    private PaymentRepository repo;
+    @Autowired
+    private PspClient pspClient;
+
+    @Transactional
+    public void create(PaymentDto dto) {
+        Payment p = new Payment();
+        p.setUserId(dto.getUserId());
+        p.setAmount(dto.getAmount());
+        p.setStatus("NEW");
+        repo.save(p);
+
+        // блокирующий вызов - может ждать 60 с
+        String extId = pspClient.charge(dto.getUserId(), dto.getAmount());
+        p.setExternalId(extId);
+        p.setStatus("CHARGED");
+        repo.save(p);
+    }
+}
+```
+
+### 2) Ошибки/риски
+- Полевая инъекция; отсутствие валидации (`@Valid`, `@Positive` и т. п.).
+- Ответ `"ok"`/`200` без тела и `Location`; нет idempotency‑key → риск дублей при ретраях клиента.
+- Блокирующий сетевой вызов внутри `@Transactional` → длинная транзакция, удержание соединения к БД, блокировки.
+- Нет согласованности при сбое между `save()` и `pspClient.charge(...)` → появятся заказы без заявки в PSP.
+- Строковый статус; лучше `enum`. Деньги — `BigDecimal` с `precision/scale`.
+- Нет наблюдаемости (traceId), ретраев, таймаутов.
+
+### 3) Что улучшить
+- Конструкторная инъекция; DTO‑валидация; `201 Created` + `id`.
+- **Outbox pattern**: сохраняем платеж и событие в одной транзакции; отдельный паблишер асинхронно вызывает PSP и апдейтит статус.
+- Идемпотентность: принимать `Idempotency-Key`/`requestId` и хранить его.
+- Таймауты/ретраи/метрики; enum статус.
+
+### 4) Корректная реализация (сокращённо, outbox + асинхронно)
+```java
+// DTO
+public record PaymentDto(@NotBlank String userId,
+                         @NotNull @Positive BigDecimal amount,
+                         @NotBlank String requestId) {}
+
+// Entity
+@Entity
+public class Payment {
+  @Id @GeneratedValue(strategy = GenerationType.IDENTITY) Long id;
+  @Column(nullable=false) String userId;
+  @Column(nullable=false, precision=19, scale=2) BigDecimal amount;
+  @Enumerated(EnumType.STRING) @Column(nullable=false) Status status;
+  String externalId;
+  @Column(unique=true, nullable=false) String requestId;
+  public enum Status { NEW, PROCESSING, CHARGED, FAILED }
+  // getters/setters
+}
+
+@Entity
+public class OutboxEvent {
+  @Id @GeneratedValue Long id;
+  @Column(nullable=false) String type; // "PAYMENT_CREATED"
+  @Column(nullable=false) Long aggregateId;
+  @Column(nullable=false) String payload;
+  @Column(nullable=false) boolean sent = false;
+}
+
+// Сервис
+@Service @RequiredArgsConstructor
+public class PaymentService {
+  private final PaymentRepository repo;
+  private final OutboxRepository outbox;
+  private final ObjectMapper mapper;
+
+  @Transactional
+  public Long create(PaymentDto dto){
+    if (repo.existsByRequestId(dto.requestId())) {
+      return repo.findByRequestId(dto.requestId()).getId();
+    }
+    Payment p = new Payment();
+    p.setUserId(dto.userId()); p.setAmount(dto.amount());
+    p.setStatus(Payment.Status.NEW); p.setRequestId(dto.requestId());
+    repo.save(p);
+
+    Map<String,Object> event = Map.of("paymentId", p.getId(), "userId", p.getUserId(), "amount", p.getAmount());
+    outbox.save(new OutboxEvent(null, "PAYMENT_CREATED", p.getId(), mapper.writeValueAsString(event), false));
+    return p.getId();
+  }
+}
+
+// Паблишер → PSP (асинхронно, вне транзакции)
+@Component @RequiredArgsConstructor @Slf4j
+public class PaymentOutboxPublisher {
+  private final OutboxRepository outbox;
+  private final PaymentRepository repo;
+  private final PspClient psp;
+
+  @Scheduled(fixedDelayString = "${outbox.delay-ms:1000}")
+  @Transactional
+  public void run() {
+    List<OutboxEvent> batch = outbox.findTop100BySentFalseOrderByIdAsc();
+    for (OutboxEvent e : batch) {
+      try {
+        Payment p = repo.findById(e.getAggregateId()).orElseThrow();
+        p.setStatus(Payment.Status.PROCESSING);
+        repo.save(p);
+        String ext = psp.charge(p.getUserId(), p.getAmount());
+        p.setExternalId(ext); p.setStatus(Payment.Status.CHARGED);
+        repo.save(p);
+        e.setSent(true); outbox.save(e);
+      } catch (Exception ex) {
+        log.warn("PSP failed for event {}: {}", e.getId(), ex.getMessage());
+        // оставить sent=false → ретрай
+      }
+    }
+  }
+}
+
+@RestController @RequestMapping("/payments") @RequiredArgsConstructor
+class PaymentController {
+  private final PaymentService svc;
+  @PostMapping
+  public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody PaymentDto dto, UriComponentsBuilder uri) {
+    Long id = svc.create(dto);
+    return ResponseEntity.created(uri.path("/payments/{id}").build(id))
+      .body(Map.of("id", id));
+  }
+}
+```
+
+---
+
+## 24) Импорт большого CSV в БД (IO + транзакции + батчи)
+
+### 1) Задание
+Нужно импортировать большой CSV (миллионы строк) в PostgreSQL. Избежать длинных транзакций, OOM и двойной обработки.
+
+### Исходный код (с ошибками)
+```java
+@Service
+public class ReportService {
+    @Autowired private ReportRepository repo;
+
+    @Transactional
+    public void importCsv(String path) throws IOException {
+        FileInputStream in = new FileInputStream(path);
+        byte[] bytes = in.readAllBytes(); // держим весь файл в памяти!
+        String[] lines = new String(bytes).split("\n");
+        for (String line : lines) {
+            String[] parts = line.split(",");
+            Report r = new Report();
+            r.setDate(LocalDate.parse(parts[0]));
+            r.setAmount(new BigDecimal(parts[1]));
+            repo.save(r); // по 1 insert на строку
+        }
+        in.close();
+    }
+}
+```
+
+### 2) Ошибки/риски
+- Чтение всего файла в память → OOM.
+- IO внутри одной **длинной** БД‑транзакции; блокировки, откаты.
+- Посрочный `save` → медленно, нет батчей.
+- Нет валидации/логирования ошибок (битых строк).
+- Нет идемпотентности/маркировки загруженных файлов.
+- Потерянные ресурсы при исключениях (нет try‑with‑resources).
+
+### 3) Что улучшить
+- Потоковое чтение (`BufferedReader`), парсинг с обработкой ошибок.
+- Батч‑вставка (`saveAll` по чанкам) или `COPY`/`JdbcTemplate.batchUpdate`.
+- Идемпотентность (таблица импорта/хеш файла/метаданные).
+- Транзакции — **короткие**, батч на N записей.
+- Метрики/логирование.
+
+### 4) Корректная реализация (батчи)
+```java
+@Service @RequiredArgsConstructor @Slf4j
+public class ReportService {
+  private final ReportRepository repo;
+
+  public void importCsv(Path path) throws IOException {
+    try (BufferedReader br = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+      List<Report> batch = new ArrayList<>(1000);
+      String line; long ok=0, bad=0;
+      while ((line = br.readLine()) != null) {
+        try {
+          String[] p = line.split(",");
+          Report r = new Report();
+          r.setDate(LocalDate.parse(p[0]));
+          r.setAmount(new BigDecimal(p[1]));
+          batch.add(r);
+          if (batch.size() == 1000) { flush(batch); ok += 1000; }
+        } catch (Exception e) {
+          bad++; log.warn("Bad line: {}", line);
+        }
+      }
+      if (!batch.isEmpty()) { flush(batch); ok += batch.size(); }
+      log.info("Import done: ok={}, bad={}", ok, bad);
+    }
+  }
+
+  @Transactional
+  public void flush(List<Report> batch){
+    repo.saveAll(batch);
+    batch.clear();
+  }
+}
+```
+
+---
+
+## 25) Сервис метрик: гонки, производительность, утечки
+
+### 1) Задание
+Сервис считает события и хранит счётчики по ключу. Сделать потокобезопасным и эффективным под высокую нагрузку.
+
+### Исходный код (с ошибками)
+```java
+@Service
+public class StatsService {
+    private static int total = 0;
+    private static Map<String, Integer> counters = new HashMap<>();
+
+    public void inc(String key) {
+        total++;
+        Integer v = counters.get(key);
+        counters.put(key, v == null ? 1 : v + 1);
+    }
+
+    public int getTotal() { return total; }
+
+    public Map<String, Integer> snapshot() {
+        return counters; // отдаём «живую» мапу наружу
+    }
+}
+```
+
+### 2) Ошибки/риски
+- Не‑потокобезопасно: гонки на `total` и `counters`.
+- Возвращаем внутреннюю структуру (внешний код может её менять).
+- Возможны «горячие» ключи → ложный sharing/узкие места на CAS.
+- Нет очистки/TTL → утечки памяти.
+
+### 3) Что улучшить
+- `LongAdder` для суммарного счётчика; `ConcurrentHashMap<String, LongAdder>` для ключей.
+- Возвращать **снимок‑копию**.
+- (Опционально) периодический сброс/TTL и метрики.
+
+### 4) Корректная реализация
+```java
+@Service
+public class StatsService {
+  private final LongAdder total = new LongAdder();
+  private final ConcurrentMap<String, LongAdder> counters = new ConcurrentHashMap<>();
+
+  public void inc(String key){
+    total.increment();
+    counters.computeIfAbsent(key, k -> new LongAdder()).increment();
+  }
+
+  public long getTotal(){ return total.sum(); }
+
+  public Map<String, Long> snapshot(){
+    Map<String, Long> snap = new HashMap<>();
+    counters.forEach((k, adder) -> snap.put(k, adder.sum()));
+    return Collections.unmodifiableMap(snap);
+  }
+}
+```
+
+---
+
+## 26) Кэш изображений: неправильный ключ, мутабельный ответ
+
+### 1) Задание
+Метод масштабирует изображение и кэширует результат. Нужны корректный ключ, обработка Optional и безопасный тип ответа.
+
+### Исходный код (с ошибками)
+```java
+@Service
+public class ProductImageService {
+
+    @Autowired private ImageRepository repo;
+    @Autowired private ImageOps ops;
+
+    @Cacheable(cacheNames = "image-cache")
+    public byte[] resize(String id, int w, int h) {
+        Image img = repo.findById(id).get(); // NoSuchElementException
+        byte[] data = ops.resize(img.getBytes(), w, h);
+        return data; // мутабельный массив
+    }
+}
+```
+
+### 2) Ошибки/риски
+- `findById(id).get()` бросит `NoSuchElementException`; нет 404 оборота.
+- Ключ кэша по умолчанию: `(id,w,h)` — ок, но желательно явно. Ещё: разные форматы/quality не учтены.
+- Возвращаемый `byte[]` мутабелен → кэш может «испортиться» внешним кодом.
+- Нет валидации размеров и лимитов.
+
+### 3) Что улучшить
+- Обработка отсутствия через исключение/404.
+- Явный ключ: `id:wxh` (+ формат/качество при необходимости).
+- Возвращать `ByteBuffer`/`ByteString`/копию массива.
+- Валидировать `w/h`, ограничить максимальные значения.
+- TTL/размер кэша (Caffeine/Redis).
+
+### 4) Корректная реализация
+```java
+@Service @RequiredArgsConstructor
+public class ProductImageService {
+  private final ImageRepository repo;
+  private final ImageOps ops;
+
+  @Cacheable(cacheNames="image-cache", key="#id + ':' + #w + 'x' + #h")
+  public ByteBuffer resize(String id, int w, int h) {
+    if (w <= 0 || h <= 0 || w > 4000 || h > 4000) throw new IllegalArgumentException("Bad size");
+    Image img = repo.findById(id).orElseThrow(() -> new ImageNotFoundException(id));
+    byte[] data = ops.resize(img.getBytes(), w, h);
+    return ByteBuffer.wrap(Arrays.copyOf(data, data.length)).asReadOnlyBuffer();
+  }
+}
+```
+
+---
+
+## 27) Уведомления: if‑else по строкам → Стратегия
+
+### 1) Задание
+Сервис отправляет уведомления по каналам EMAIL/SMS/TELEGRAM. Сейчас выбор сделан через строки и `if-else` — нужно рефакторить.
+
+### Исходный код (с ошибками)
+```java
+@Service
+public class NotifyService {
+
+    public void send(String type, String to, String msg) {
+        if (type.equals("email")) {
+            new EmailClient().send(to, msg);
+        } else if (type.equals("sms")) {
+            new SmsClient().send(to, msg);
+        } else if (type.equals("telegram")) {
+            new TelegramClient().send(to, msg);
+        } else {
+            // ничего
+        }
+    }
+}
+```
+
+### 2) Ошибки/риски
+- Магические строки, риск опечаток/регистра.
+- Создание клиентов в методе (нет DI/конфигурации).
+- Нет валидации `to`/`msg`, обработки ошибок, логирования.
+- Отсутствие расширяемости (OCP).
+
+### 3) Что улучшить
+- Ввести `enum Channel` и `fromString()`.
+- Интерфейс `Notifier` + реализации на каналы; зарегистрировать через Spring и выбрать по карте.
+- DI клиентов, ретраи/таймауты/логирование.
+
+### 4) Корректная реализация
+```java
+public enum Channel {
+  EMAIL, SMS, TELEGRAM;
+  public static Channel from(String v){
+    return Arrays.stream(values()).filter(c -> c.name().equalsIgnoreCase(v))
+      .findFirst().orElseThrow(() -> new IllegalArgumentException("Unsupported: " + v));
+  }
+}
+
+public interface Notifier { Channel channel(); void send(String to, String msg); }
+
+@Component class EmailNotifier implements Notifier { /* ... */ }
+@Component class SmsNotifier implements Notifier { /* ... */ }
+@Component class TelegramNotifier implements Notifier { /* ... */ }
+
+@Service
+public class NotifyService {
+  private final Map<Channel, Notifier> map;
+  public NotifyService(List<Notifier> list){
+    this.map = list.stream().collect(Collectors.toUnmodifiableMap(Notifier::channel, n -> n));
+  }
+  public void send(String channel, String to, String msg){
+    Objects.requireNonNull(to); Objects.requireNonNull(msg);
+    Notifier n = map.get(Channel.from(channel));
+    n.send(to, msg);
+  }
+}
+```
+
+---
+
+
+# Две новые задачи для собеса на Java (в стиле ваших примеров)
+
+Формат по каждой задаче:  
+**1) Задание** · **Исходный код (с ошибками)** · **2) Ошибки/риски** · **3) Что улучшить** · **4) Корректная реализация (пример)**
+
+---
+
+## 28) RewardCalculationService — расчёт бонусов сотрудникам (God‑service, деньги через double, внешние вызовы в транзакции)
+
+### 1) Задание
+Дан сервис, который **для каждого сотрудника** ищет бонусы, проверяет право на выплату, тянет тариф/рейтинг/налоги/персональные данные из внешних сервисов, рассчитывает сумму, вызывает платёжный шлюз и создаёт подарок. Нужно: найти проблемы, предложить улучшения и показать корректную реализацию с учётом надёжности, безопасности данных и производительности.
+
+### Исходный код (с ошибками)
+```java
+@Service
+public class RewardCalculationService {
+
+    @Autowired private BonusRepository bonusRepository;
+    @Autowired private TariffPlanRepository tariffPlanRepository;
+    @Autowired private PaymentGatewayClient paymentGatewayClient;
+    @Autowired private EmployeeRatingService employeeRatingService;
+    @Autowired private TaxCalculatorService taxCalculatorService;
+    @Autowired private AddressService addressService;
+    @Autowired private GiftService giftService;
+    @Autowired private EmployeePersonaDataService personaDataService;
+
+    @Transactional
+    public void processEmployeeBonuses(List<Employee> employees) {
+        for (Employee employee : employees) {
+            List<Bonus> bonuses = bonusRepository.findPendingByEmployeeId(employee.getId());
+            for (Bonus bonus : bonuses) {
+                if (isEligibleForPayment(bonus.getActivityType())) {
+                    TariffPlan tariff = tariffPlanRepository.findActiveTariff(bonus.getActivityType(), new java.util.Date());
+                    double employeeRating = employeeRatingService.getEmployeeRating(employee.getId());
+                    double taxRate = taxCalculatorService.calcTaxRate(employee.getPosition(), bonus.getActivityType(), new java.util.Date());
+                    EmployeePersonaData personaData = personaDataService.getPersonaData(employee.getId());
+
+                    System.out.println("Сотрудник: " + personaData.getFullName() + ", дата рождения: " + personaData.getBirthDate() + ", ИНН: " + personaData.getTaxId());
+
+                    double base = tariff.getBaseAmount();
+                    double finalAmount = base * (1 + employee.getPersonalCoefficient() * (0.5 * employeeRating / 10) * (1 - taxRate / 100));
+
+                    paymentGatewayClient.executePayment(employee.getBankAccountId(), finalAmount);
+                    System.out.println("Выплата для " + personaData.getFullName() + " = выполнена");
+
+                    Address shipping = addressService.getEmployeeShippingAddress(employee.getId());
+                    giftService.createGiftOrder(employee.getId(), shipping.getFullAddress(), "Premium Gift Box");
+                    System.out.println("Подарочный бокс для " + personaData.getFullName() + " = создан");
+
+                    bonus.setStatus("PAID");
+                    bonusRepository.save(bonus);
+
+                    System.out.println("Обработка завершена для: " + personaData.getFullName() + " , ИНН: " + personaData.getTaxId() + ", Сумма: " + finalAmount);
+                }
+            }
+        }
+    }
+
+    private boolean isEligibleForPayment(String activityType) {
+        return List.of("lecture", "masterclass", "conference_talk", "mentoring").contains(activityType);
+    }
+}
+```
+
+### 2) Ошибки/риски
+- **God‑service**: смешаны оркестрация, расчёт, доступ к БД, внешние вызовы, подарки, адреса и логирование PII.
+- **Внешние вызовы внутри `@Transactional`** → длинные транзакции, блокировки БД, повторная отправка при ретраях, «зависание» пула соединений.
+- **Деньги через `double`** → ошибки округления, «копейки теряются». Для денег нужен `BigDecimal` с `MathContext` и валютной шкалой.
+- **Логи с персональными данными (PII)** через `System.out.println` → нарушение практик безопасности и комплаенса. Нужен `Slf4j` и маскирование PII.
+- **Дата как `new java.util.Date()`** в разных местах → проблемы с TZ/консистентностью. Лучше `Instant/LocalDate` и передавать «на момент расчёта».
+- **Хрупкая бизнес‑формула** в методе, нет тестов и версионирования тарифов.
+- **Идемпотентность** отсутствует: повторный вызов может дважды списать деньги/создать подарок.
+- **Ошибка устойчивости**: одна ошибка в платеже/подарке «обрушит» всё; нет ретраев/таймаутов (Resilience4j).
+- **N+1**: загружаются бонусы, адреса и personaData по одному на каждого сотрудника; стоит батчить.
+- **Строковые статусы** `"PAID"` → лучше `enum`.
+- **Полевая инъекция** — хуже для тестирования.
+
+### 3) Что улучшить
+- Разделить на слои: `BonusOrchestrator` (оркестрация) → `BonusCalculator` (бизнес‑формулы, чистая логика) → `PaymentOutboxPublisher` (асинхронная выплата) → `GiftOutboxPublisher` (асинхронные подарки).
+- Вынести внешние вызовы **вне** транзакции; использовать **Outbox pattern** для платежа/подарка, либо отправку в очередь (Kafka).
+- Деньги — `BigDecimal`/`Currency` и единые правила округления; фиксировать «момент расчёта».
+- Маскировать PII в логах; использовать `@Slf4j`.
+- Идемпотентные ключи: по `bonusId`/`eventId`.
+- Пагинация/батчи (например, список сотрудников по страницам).
+- Юнит‑тесты на формулу.
+
+### 4) Корректная реализация (сокращено, с outbox и BigDecimal)
+```java
+// Доменные типы
+public enum BonusStatus { PENDING, CALCULATED, PAID, FAILED }
+
+public record PaymentCommand(Long bonusId, Long employeeId, BigDecimal amount, String bankAccountId) {}
+public record GiftCommand(Long bonusId, Long employeeId, String address, String sku) {}
+
+@Service @RequiredArgsConstructor @Slf4j
+public class BonusOrchestrator {
+  private final BonusRepository bonusRepo;
+  private final EmployeeRepository employeeRepo;
+  private final TariffPlanRepository tariffRepo;
+  private final EmployeeRatingService ratingService;
+  private final TaxCalculatorService taxService;
+  private final AddressService addressService;
+  private final OutboxRepository outbox;
+  private final BonusCalculator calculator;
+
+  // только чтение/расчёт + запись в outbox; внешние вызовы исполнятся асинхронно потребителями
+  @Transactional
+  public void processBonusesForEmployees(List<Long> employeeIds, Instant asOf) {
+    List<Employee> employees = employeeRepo.findAllByIdIn(employeeIds);
+    for (Employee e : employees) {
+      List<Bonus> bonuses = bonusRepo.findByEmployeeIdAndStatus(e.getId(), BonusStatus.PENDING);
+      for (Bonus b : bonuses) {
+        if (!calculator.isEligible(b.getActivityType())) continue;
+        TariffPlan t = tariffRepo.findActiveTariff(b.getActivityType(), asOf).orElseThrow();
+        BigDecimal rating = ratingService.getEmployeeRatingBD(e.getId()); // BigDecimal
+        BigDecimal tax = taxService.calcTaxRateBD(e.getPosition(), b.getActivityType(), asOf);
+
+        BigDecimal finalAmount = calculator.calculate(t, e, rating, tax);
+        b.setCalculatedAmount(finalAmount);
+        b.setStatus(BonusStatus.CALCULATED);
+        bonusRepo.save(b);
+
+        String address = addressService.getEmployeeShippingAddress(e.getId()).getFullAddress();
+
+        // Outbox для платежа
+        outbox.save(OutboxEvent.payment(new PaymentCommand(b.getId(), e.getId(), finalAmount, e.getBankAccountId())));
+        // Outbox для подарка
+        outbox.save(OutboxEvent.gift(new GiftCommand(b.getId(), e.getId(), address, "PREMIUM_GIFT_BOX")));
+
+        log.info("Bonus calculated: bonusId={}, employeeId={}, amount={}", b.getId(), e.getId(), finalAmount);
+      }
+    }
+  }
+}
+
+@Component
+public class BonusCalculator {
+  private static final MathContext MC = new MathContext(10, RoundingMode.HALF_UP);
+  public boolean isEligible(String type){ return Set.of("lecture","masterclass","conference_talk","mentoring").contains(type); }
+
+  public BigDecimal calculate(TariffPlan tariff, Employee e, BigDecimal rating, BigDecimal taxRate){
+    BigDecimal base = tariff.getBaseAmount(); // scale=2
+    BigDecimal coeff = BigDecimal.ONE.add(
+        e.getPersonalCoefficient()
+         .multiply(new BigDecimal("0.5"), MC)
+         .multiply(rating.divide(new BigDecimal("10"), MC), MC)
+         .multiply(BigDecimal.ONE.subtract(taxRate.divide(new BigDecimal("100"), MC), MC), MC)
+    );
+    return base.multiply(coeff, MC).setScale(2, RoundingMode.HALF_UP);
+  }
+}
+
+// Асинхронный консьюмер Outbox -> платежный шлюз
+@Component @RequiredArgsConstructor @Slf4j
+public class PaymentDispatcher {
+  private final PaymentGatewayClient payment;
+  private final BonusRepository bonusRepo;
+  private final OutboxRepository outbox;
+
+  @Scheduled(fixedDelayString = "${outbox.delay-ms:1000}")
+  @Transactional
+  public void dispatch() {
+    List<OutboxEvent> events = outbox.findTop100ByTypeAndSentFalseOrderByIdAsc("PAYMENT");
+    for (OutboxEvent e : events) {
+      try {
+        PaymentCommand cmd = e.readPayload(PaymentCommand.class);
+        payment.executePayment(cmd.bankAccountId(), cmd.amount()); // с таймаутами/ретраями
+        bonusRepo.markPaid(cmd.bonusId());
+        e.setSent(true); outbox.save(e);
+        log.info("Payment sent: bonusId={}, amount={}", cmd.bonusId(), cmd.amount());
+      } catch (Exception ex) {
+        log.warn("Payment failed for event {}: {}", e.getId(), ex.toString());
+      }
+    }
+  }
+}
+```
+
+---
+
+## 29) SyncServiceImpl — синхронизация магазинов/товаров (параллельные стримы + транзакции + JPA + Kafka)
+
+### 1) Задание
+Код должен обойти магазины, синхронизировать товары, спросить детали продавца через REST и отправить `ProductDto` в Kafka. Найти проблемы и показать безопасный/масштабируемый вариант.
+
+### Исходный код (с ошибками)
+```java
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class SyncServiceImpl implements SyncService {
+
+    private final SellerRestClient restClient;
+    private final ShopRepository shopRepository;
+    private final ProductRepository productRepository;
+    private final KafkaTemplate<String, ProductDto> kafkaTemplate;
+
+    @Override
+    public void syncShops() {
+        for (Shop shop : shopRepository.findAll()) {
+            try {
+                syncShop(shop);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @Transactional
+    @Override
+    public void syncShop(Shop shop) {
+        log.info("Syncing shop");
+        shopRepository.lockShop(shop.getId()); // SELECT * FROM shop WHERE id = ? FOR UPDATE
+
+        var products = shop.getProducts();
+        products.parallelStream()
+                .forEach(product -> {
+                    log.info("Syncing product");
+                    var seller = product.getSeller();
+                    var sellerDetails = restClient.getLegalDetails(seller.getInn());
+
+                    var dto = new ProductDto();
+                    dto.setProduct(product);              // передаём JPA‑сущность в Kafka!
+                    dto.setSellerDetails(sellerDetails);
+
+                    kafkaTemplate.send("product_details", "product", dto); // фиксированный ключ
+
+                    product.setSynced(true);
+                    productRepository.save(product);
+                });
+        shop.setSynced(true);
+    }
+}
+```
+
+### 2) Ошибки/риски
+- **`@Transactional` + `parallelStream()`**: `EntityManager` **не потокобезопасен**; ленивые коллекции/прокси обращаются из параллельных потоков → `LazyInitializationException`/коррупция состояния.
+- **Внешние вызовы внутри транзакции** (REST/Kafka) → длинные транзакции, блокировки. Сообщение может уйти в Kafka, а транзакция БД затем откатится → рассинхрон.
+- **Отправка JPA‑сущности в Kafka** (`dto.setProduct(product)`) → сериализация графа, lazy‑прокси, чувствительные поля; жёсткая связка форматов.
+- **Фиксированный Kafka‑ключ `"product"`** → все сообщения в один раздел, дисбаланс/узкое горлышко.
+- **`findAll()` без пагинации** → много памяти/длинная операция.
+- **`e.printStackTrace()`** вместо логов; **нет ретраев/таймаутов** для REST.
+- **`lockShop()`** через `SELECT ... FOR UPDATE` без дальнейших апдейтов магазина; может блокировать лишне.
+- Не вызывается явный `save` магазина (полагаться на flush можно, но с detach/clear — риск).
+- Нет **идемпотентности**: повторный запуск может дублировать сообщения.
+
+### 3) Что улучшить
+- Делать **пагинацию по магазинам**; для каждого магазина — **постранично** обрабатывать товары.
+- Убрать `parallelStream()` с JPA‑сущностями; если нужна параллельность — собирать **DTO** и обрабатывать вне транзакции в пуле потоков.
+- Разделить: транзакция **только на обновление флагов**; REST/Kafka — **вне** транзакции. Лучше — **Outbox** (product_synced) и отдельный паблишер.
+- В Kafka посылать **плоский DTO** (id, sku, shopId, sellerInn, sellerDetails...), без JPA‑сущностей. Ключ = `productId`/`sku`.
+- Логирование/метрики/ретраи (Resilience4j) для REST.
+- Для блокировок — `@Lock(PESSIMISTIC_WRITE)` на чтение магазина/товара по id, только если реально нужно.
+- Идемпотентность на уровне «уже синхронизирован» и ключей сообщений.
+
+### 4) Корректная реализация (сокращено, без параллельного доступа к JPA)
+```java
+@Data @AllArgsConstructor @NoArgsConstructor
+public class ProductSyncMsg {
+  private Long productId;
+  private Long shopId;
+  private String sku;
+  private String sellerInn;
+  private SellerDetails sellerDetails;
+}
+
+@Service @RequiredArgsConstructor @Slf4j
+public class SyncServiceImpl implements SyncService {
+  private final SellerRestClient restClient;
+  private final ShopRepository shopRepo;
+  private final ProductRepository productRepo;
+  private final KafkaTemplate<String, ProductSyncMsg> kafka;
+
+  // 1) Пагинированный обход магазинов
+  @Override
+  public void syncShops() {
+    int page = 0, size = 100;
+    Page<Shop> shops;
+    do {
+      shops = shopRepo.findAll(PageRequest.of(page++, size));
+      shops.forEach(this::syncShopSafely);
+    } while (!shops.isEmpty());
+  }
+
+  private void syncShopSafely(Shop shop){
+    try { syncShop(shop.getId()); }
+    catch (Exception e){ log.warn("Shop sync failed, id={}: {}", shop.getId(), e.toString(), e); }
+  }
+
+  // 2) Транзакция — только для чтения списка id + апдейт флагов
+  @Transactional
+  public void syncShop(Long shopId) {
+    Shop shop = shopRepo.findById(shopId).orElseThrow();
+    List<Long> productIds = productRepo.findIdsByShopIdAndSyncedFalse(shopId);
+
+    for (Long pid : productIds) {
+      // достаём минимальные данные для REST вне транзакции
+      ProductProjection p = productRepo.findProjectionById(pid); // id, sku, sellerInn
+      processOneProduct(shop.getId(), p);
+      // помечаем как синхронизированный в отдельной короткой транзакции
+      productRepo.markSynced(pid);
+    }
+    shopRepo.markSynced(shop.getId());
+  }
+
+  // 3) Вне транзакции: REST + Kafka, плоский DTO и хороший ключ
+  private void processOneProduct(Long shopId, ProductProjection p){
+    SellerDetails details = restClient.getLegalDetails(p.getSellerInn()); // с таймаутами/ретраями
+    ProductSyncMsg msg = new ProductSyncMsg(p.getId(), shopId, p.getSku(), p.getSellerInn(), details);
+    kafka.send("product_details", String.valueOf(p.getId()), msg);
+    log.info("Product synced: productId={}, shopId={}", p.getId(), shopId);
+  }
+}
+
+// Репозиторий — проекции и update‑методы
+public interface ProductRepository extends JpaRepository<Product, Long> {
+  @Query("select p.id from Product p where p.shop.id = :shopId and p.synced = false")
+  List<Long> findIdsByShopIdAndSyncedFalse(@Param("shopId") Long shopId);
+
+  interface ProductProjection { Long getId(); String getSku(); String getSellerInn(); }
+
+  @Query("select p.id as id, p.sku as sku, p.seller.inn as sellerInn from Product p where p.id = :id")
+  ProductProjection findProjectionById(@Param("id") Long id);
+
+  @Modifying @Query("update Product p set p.synced = true where p.id = :id")
+  void markSynced(@Param("id") Long id);
+}
+
+public interface ShopRepository extends JpaRepository<Shop, Long> {
+  @Modifying @Query("update Shop s set s.synced = true where s.id = :id")
+  void markSynced(@Param("id") Long id);
+}
+```
+
+---
+
+**Готово.** Обе задачи содержат исходные проблемные фрагменты, подробный разбор и рефакторинг с акцентом на транзакционные границы, безопасность и асинхронность.
+
 
