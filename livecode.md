@@ -707,13 +707,23 @@ public class DocumentService {
   public DocumentService(List<DocumentProcessor> processors){
     this.registry = processors.stream().collect(Collectors.toUnmodifiableMap(DocumentProcessor::supports, p->p));
   }
-  public void process(Document[] docs){
-    for (Document d: docs){
-      Objects.requireNonNull(d);
-      var p = Objects.requireNonNull(registry.get(d.type), "Unsupported type: "+d.type);
-      p.process(d);
+   public void process(Document[] documents) {
+        for (Document document : documents) {
+
+            if (document == null) {
+                throw new IllegalArgumentException("Document cannot be null");
+            }
+
+            DocumentType type = document.type;
+            DocumentProcessor processor = processorRegistry.get(type);
+
+            if (processor == null) {
+                throw new IllegalArgumentException("Unsupported document type: " + type);
+            }
+
+            processor.process(document);
+        }
     }
-  }
 }
 ```
 
