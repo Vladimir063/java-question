@@ -181,7 +181,6 @@ public class OutboxPublisher {
 @Transactional
 public void process(String oldName, String newName) { 
     Long id = exec("select id from file where name='" + oldName + "'"); //выполнение запроса к БД 
-    insert 
     processFile(oldName, newName); //переименование файла на диске
     exec("update file set name='" + newName + "' where id = " + id);  
 }
@@ -189,7 +188,6 @@ public void process(String oldName, String newName) {
 
 ### 2) Ошибки/риски
 - **SQL-инъекции**: конкатенация входных значений.
-- **Лишний `insert`** — похоже на мусор/опечатку.
 - **Файловая система не откатывается транзакцией БД**: при rollback файл уже переименован → несогласованность.
 - **Порядок шагов**: сначала ФС, потом БД — при падении update БД останемся с неправильным именем.
 - **Нет блокировок/конкуренции**: гонки при одновременных запросах.
