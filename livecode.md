@@ -2753,3 +2753,211 @@ public void run() {
 
 ---
 
+
+# Пять НОВЫХ задач по низкоуровневой многопоточности (Java)
+
+Каждая задача — это «интервью-стайл»: дан код, затем вопросы **что тут не так** и **какие возможные выводы в консоль**. После задачи — разворачиваемый ответ.
+
+---
+
+## Задача 1 — флаг остановки без `volatile`
+
+```java
+public class Task1 {
+    static boolean stop = false; // <- без volatile
+    static long counter = 0;
+
+    public static void main(String[] args) throws Exception {
+        Thread t = new Thread(() -> {
+            while (!stop) { // может не увидеть false
+                counter++;
+            }
+            System.out.println("Worker stopped, counter=" + counter);
+        });
+        t.start();
+
+        Thread.sleep(50);
+        stop = true; // запись может остаться "невидимой" для t
+        t.join(200); // ждём немного
+        System.out.println("Main done");
+    }
+}
+```
+
+**Вопросы:**  
+1) Что тут не так?  
+2) Что потенциально будет в консоли?
+
+<details><summary>Ответ</summary>
+
+- Проблема: отсутствует отношение *happens-before* между записью `stop = true` и чтением `!stop` в другом потоке. Переменная не `volatile`, нет синхронизации. Поток `t` может бесконечно крутиться (оптимизации/кэширование).  
+- Вывод: возможны варианты —
+  - программа зависает (воркер не выходит), в консоли лишь `Main done` или вообще ничего;
+  - либо оба сообщения, например:
+    ```
+    Worker stopped, counter=1234567
+    Main done
+    ```
+  Никаких гарантий порядка и самого факта остановки нет.
+- Починка: сделать `stop` `volatile` или останавливать через `interrupt()` + проверка `Thread.currentThread().isInterrupted()`.
+</details>
+
+---
+
+## Задача 2 — `volatile` не спасает `x++`
+
+```java
+import java.util.concurrent.*;
+
+public class Task2 {
+    static volatile int x = 0; // только видимость
+    public static void main(String[] args) throws Exception {
+        int threads = 4, iters = 100_000;
+        Thread[] ts = new Thread[threads];
+        for (int t = 0; t < threads; t++) {
+            ts[t] = new Thread(() -> {
+                for (int i = 0; i < iters; i++) {
+                    x++; // read-modify-write -> гонка
+                }
+            });
+            ts[t].start();
+        }
+        for (Thread t : ts) t.join();
+        System.out.println("x = " + x);
+    }
+}
+```
+
+**Вопросы:**  
+1) Что не так?  
+2) Что будет выведено?
+
+<details><summary>Ответ</summary>
+
+- Проблема: `volatile` не делает операцию `x++` атомарной. Несколько потоков читают старое значение и перезаписывают его — часть инкрементов теряется.
+- Вывод: `x` почти всегда **меньше** ожидаемого `threads * iters` (то есть `< 400_000`), конкретное число зависит от гонок.
+- Починка: `AtomicInteger.incrementAndGet()`, `LongAdder`, либо синхронизация вокруг инкремента.
+</details>
+
+---
+
+## Задача 3 — синхронизация на «самом же» счётчике (автобоксинг ломает мьютекс)
+
+```java
+public class Task3 {
+    static Integer lock = 0;       // объект-бокс
+    static int count = 0;
+
+    public static void main(String[] args) throws Exception {
+        Runnable r = () -> {
+            for (int i = 0; i < 1000; i++) {
+                synchronized (lock) { // захватили текущий объект
+                    count++;
+                    lock++;           // !! теперь lock указывает на НОВЫЙ Integer
+                    // следующий заход синхронизируется уже на другом объекте
+                }
+            }
+        };
+        Thread t1 = new Thread(r);
+        Thread t2 = new Thread(r);
+        t1.start(); t2.start();
+        t1.join();  t2.join();
+        System.out.println("count = " + count);
+    }
+}
+```
+
+**Вопросы:**  
+1) Что не так?  
+2) Что будет выведено?
+
+<details><summary>Ответ</summary>
+
+- Проблема: синхронизация идёт по ссылке `lock`, но внутри блока ссылка меняется (`lock++` создаёт **новый** `Integer`). В разных итерациях и потоках блокировка происходит на **разных** объектах — критическая секция не защищена. Дополнительно, малые значения `Integer` кешируются, что делает поведение ещё менее очевидным.
+- Вывод: из‑за гонки `count` обычно \< 2000; порядок и значения недетерминированы. Исключений не будет, но взаимное исключение нарушено.
+- Починка: использовать **неизменяемый** объект для монитора (`final Object MON = new Object()`), либо `synchronized (Task3.class)`, либо атомики/локи.
+</details>
+
+---
+
+## Задача 4 — `synchronized` на экземпляре при доступе к `static` полю
+
+```java
+public class Task4 {
+    private static int shared = 0; // общий ресурс
+
+    // метод синхронизирован по "this"
+    synchronized void incAndPrint() {
+        shared++;
+        System.out.println(Thread.currentThread().getName() + " -> " + shared);
+    }
+
+    public static void main(String[] args) throws Exception {
+        Task4 a = new Task4();
+        Task4 b = new Task4();
+        Thread t1 = new Thread(() -> { for (int i = 0; i < 1000; i++) a.incAndPrint(); }, "T1");
+        Thread t2 = new Thread(() -> { for (int i = 0; i < 1000; i++) b.incAndPrint(); }, "T2");
+        t1.start(); t2.start();
+        t1.join();  t2.join();
+        System.out.println("Final = " + shared);
+    }
+}
+```
+
+**Вопросы:**  
+1) Что не так?  
+2) Что будет выведено?
+
+<details><summary>Ответ</summary>
+
+- Проблема: `incAndPrint()` синхронизирован **на разных мониторах** (`a` и `b`), а поле `shared` общее (`static`). Итог — гонка при инкременте+печати.
+- Вывод: `Final` часто \< 2000; строки `T1/T2 -> ...` идут вперемешку, возможны повторы/пропуски.
+- Починка: сделать метод `static synchronized` (монитор `Task4.class`), либо синхронизироваться на общем объекте, либо использовать атомики.
+</details>
+
+---
+
+## Задача 5 — переупорядочивание без `volatile` (может напечатать `0`)
+
+```java
+public class Task5 {
+    static int data = 0;
+    static boolean ready = false;
+
+    public static void main(String[] args) throws Exception {
+        for (int attempt = 0; attempt < 1_000_000; attempt++) {
+            data = 0; ready = false;
+
+            Thread writer = new Thread(() -> {
+                data = 1;      // запись 1
+                ready = true;  // запись 2
+            });
+
+            Thread reader = new Thread(() -> {
+                while (!ready) { /* spin */ }
+                System.out.println(data);  // 0 ИЛИ 1
+            });
+
+            writer.start(); reader.start();
+            writer.join();  reader.join();
+        }
+    }
+}
+```
+
+**Вопросы:**  
+1) Что не так?  
+2) Какие значения допустимы в консоли?
+
+<details><summary>Ответ</summary>
+
+- Проблема: между потоками нет *happens-before*. Из-за разрешённых JVM переупорядочиваний и отсутствия барьеров чтение может увидеть `ready == true`, но `data == 0`.
+- Вывод: теоретически допустимы **оба** значения — `1` и `0`. На практике «0» наблюдается не всегда, поэтому тест повторяется в цикле.
+- Починка: объявить `ready` `volatile` (или синхронизироваться), чтобы установить порядок видимости `data=1` → `ready=true` → чтение `ready` → чтение `data`.
+</details>
+
+---
+
+Готово. Эти 5 задач — новые относительно предыдущего набора и сфокусированы на синхронизации, `volatile`, инкрементах и циклах. Копируйте в IDE и экспериментируйте.
+
+
