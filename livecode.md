@@ -2594,6 +2594,327 @@ public interface ShopRepository extends JpaRepository<Shop, Long> {
 
 ---
 
-**Готово.** Обе задачи содержат исходные проблемные фрагменты, подробный разбор и рефакторинг с акцентом на транзакционные границы, безопасность и асинхронность.
+
+---
+
+## 30) Дано (исходный код из скриншота)
+
+```java
+public class ThreadTask {
+
+    public static class TestClass extends Thread {
+
+        private static int threadcounter = 0;
+
+        public void run() {
+            ++threadcounter;
+            System.out.println(threadcounter);
+        }
+
+        public static void main(String[] args) throws Exception {
+            for (int i = 0; i < 10; i++) {
+                synchronized (TestClass.class) {
+                    new TestClass().start();
+                }
+            }
+        }
+    }
+}
+```
+
+### Что тут не так
+
+1. **Гонка данных на `threadcounter`.**  
+   Операция `++threadcounter` не атомарна (это read-modify-write). Несколько потоков могут одновременно прочитать одно и то же значение и записать обратно одинаковое — часть инкрементов потеряется. Итог: в консоли могут появляться повторяющиеся/пропущенные числа, а фактическое значение счётчика будет ≤ 10.
+
+2. **Бесполезная синхронизация в `main`.**  
+   `synchronized (TestClass.class)` защищает только создание и `start()` потока. Сам `run()` выполняется *вне* этого мьютекса, и инкремент всё равно не защищён. Такая синхронизация здесь ничего не даёт.
+
+3. **Нет ожидания завершения потоков.**  
+   Программа не гарантирует, что все 10 потоков успеют отработать до конца. (JVM не завершится, пока есть не-демон-потоки, но порядок/времена вывода непредсказуемы. Для корректной «финализации» — использовать `join()` или синхро-примитив типа `CountDownLatch`.)
+
+4. **Расширять `Thread` не обязательно.**  
+   В большинстве случаев удобнее передавать `Runnable` в `ExecutorService`. Это упрощает управление пулом и жизненным циклом задач.
+
+5. **Стиль/удобство диагностики.**  
+   Хотелось бы печатать имя потока и финальный итог: так легче проверять корректность.
+
+---
+
+## 31) Исправление (вариант с `AtomicInteger` + `ExecutorService`)
+
+```java
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
+
+public class FixedAtomic {
+    public static void main(String[] args) throws InterruptedException {
+        AtomicInteger counter = new AtomicInteger(0);
+        int threads = 10;
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch done = new CountDownLatch(threads);
+
+        IntStream.range(0, threads).forEach(i ->
+            pool.submit(() -> {
+                try {
+                    int v = counter.incrementAndGet(); // атомарное ++
+                    System.out.printf("%s -> %d%n",
+                            Thread.currentThread().getName(), v);
+                } finally {
+                    done.countDown();
+                }
+            })
+        );
+
+        done.await();              // ждём все задачи
+        pool.shutdown();           // мягко закрываем пул
+        System.out.println("Final = " + counter.get()); // гарантированно 10
+    }
+}
+```
+
+**Что изменилось / почему корректно**
+
+- `AtomicInteger.incrementAndGet()` делает инкремент атомарно.
+- `CountDownLatch` гарантирует, что `main` дождётся завершения всех задач.
+- `ExecutorService` управляет рабочими потоками.
+
+---
+
+## 32) Альтернатива (вариант с `LongAdder`)
+
+`LongAdder` эффективнее при высокой конкуренции на обновления, хотя и даёт «сумму по шартам» только в момент вызова `sum()`.
+
+```java
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.IntStream;
+
+public class FixedLongAdder {
+    public static void main(String[] args) throws InterruptedException {
+        LongAdder adder = new LongAdder();
+        int threads = 10;
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch done = new CountDownLatch(threads);
+
+        IntStream.range(0, threads).forEach(i ->
+            pool.submit(() -> {
+                try {
+                    adder.increment(); // быстрая запись под конкуренцией
+                    System.out.printf("%s incremented%n",
+                            Thread.currentThread().getName());
+                } finally {
+                    done.countDown();
+                }
+            })
+        );
+
+        done.await();
+        pool.shutdown();
+        System.out.println("Sum = " + adder.sum()); // 10
+    }
+}
+```
+
+**Когда лучше `AtomicInteger`, а когда `LongAdder`**  
+- Нужна точная атомарная операция «прочитал-обновил-вернул новое значение» — берём `AtomicInteger`.  
+- Нужны очень частые инкременты из множества потоков и редкое чтение итоговой суммы — `LongAdder`.
+
+---
+
+## 33) Почему `synchronized (TestClass.class)` в исходнике не помогает?
+
+Поток в `run()` не входит в этот же монитор, поэтому инкремент не защищён. Чтобы синхронизация работала, нужно либо:
+- синхронизировать именно вокруг `++threadcounter` на том же объекте-мониторе,
+- либо заменить на атомик/аддер.
+
+Пример с рабочей синхронизацией (но более тяжёлый по сравнению с атомиками):
+
+```java
+public void run() {
+    synchronized (TestClass.class) {
+        ++threadcounter;
+        System.out.println(threadcounter);
+    }
+}
+```
+
+---
+
+## 34) Что могло выводиться в исходном коде?
+
+Никаких гарантий порядка. Возможны:
+- Повторы чисел (`1, 2, 2, 3, 4, 4, 5, ...` — потерянные инкременты).
+- Пропуски и итоговое значение меньше 10.
+- Межпоточный порядок сообщений произвольный.
+
+---
+
+## 35) Ещё 5 типичных задач со собеседований
+
+Ниже — мини-задачи: «что тут не так и что будет выведено».
+
+### Задача A — `volatile` не делает `++` атомарным
+
+```java
+import java.util.concurrent.*;
+public class VolatileCounter {
+    private static volatile int c = 0;
+    public static void main(String[] args) throws Exception {
+        int threads = 4, iters = 500_000;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        for (int t = 0; t < threads; t++) {
+            pool.submit(() -> { for (int i = 0; i < iters; i++) c++; });
+        }
+        pool.shutdown();
+        pool.awaitTermination(1, TimeUnit.MINUTES);
+        System.out.println("c = " + c);
+    }
+}
+```
+
+**Что не так:** `volatile` обеспечивает видимость, но не атомарность составных операций. `c++` — read-modify-write с гонкой.  
+**Что в консоли:** `c` почти всегда `< 2_000_000`.  
+**Как починить:** `AtomicInteger`/`LongAdder`, либо `synchronized` вокруг инкремента.
+
+---
+
+### Задача B — синхронизация на разных объектах не защищает критическую секцию
+
+```java
+public class BrokenSync {
+    static class Logger {
+        void log(String msg) {
+            synchronized (this) {          // каждый поток — со своим "this"
+                System.out.print("[");
+                try { Thread.sleep(5); } catch (InterruptedException ignored) {}
+                System.out.println(msg + "]");
+            }
+        }
+    }
+    public static void main(String[] args) {
+        new Thread(() -> new Logger().log("A")).start();
+        new Thread(() -> new Logger().log("B")).start();
+    }
+}
+```
+
+**Что не так:** каждый поток синхронизируется на *своём* экземпляре `Logger`, мьютекса общего нет.  
+**Что в консоли:** скобки и сообщения могут перемешаться и «рваться», например:
+```
+[
+[A
+B]
+```
+**Как починить:** синхронизироваться на *общем* объекте/мониторе, использовать общий `Logger` или `Lock`/`ExecutorService`.
+
+---
+
+### Задача C — взаимная блокировка (deadlock)
+
+```java
+public class DeadlockDemo {
+    private static final Object A = new Object();
+    private static final Object B = new Object();
+
+    public static void main(String[] args) {
+        Thread t1 = new Thread(() -> {
+            synchronized (A) {
+                System.out.println("T1: locked A");
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+                synchronized (B) {
+                    System.out.println("T1: locked B");
+                }
+            }
+        });
+        Thread t2 = new Thread(() -> {
+            synchronized (B) {
+                System.out.println("T2: locked B");
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+                synchronized (A) {
+                    System.out.println("T2: locked A");
+                }
+            }
+        });
+        t1.start(); t2.start();
+    }
+}
+```
+
+**Что не так:** разные порядки захвата одних и тех же локов → дедлок.  
+**Что в консоли:** почти всегда
+```
+T1: locked A
+T2: locked B
+```
+…и процесс зависает.  
+**Как починить:** соблюдать единый порядок захвата, использовать `tryLock` с таймаутом, `DeadlockDetector`, либо более грубую блокировку.
+
+---
+
+### Задача D — флаг остановки без `volatile`/barrier
+
+```java
+public class StopFlag {
+    private static boolean running = true; // не volatile
+    public static void main(String[] args) throws Exception {
+        Thread worker = new Thread(() -> {
+            long spins = 0;
+            while (running) { spins++; }
+            System.out.println("Stopped after " + spins + " spins");
+        });
+        worker.start();
+        Thread.sleep(100);
+        running = false;  // может не стать видимым воркеру
+        worker.join(200); // ждём чуть-чуть
+        System.out.println("Main done");
+    }
+}
+```
+
+**Что не так:** отсутствие отношений `happens-before` → поток может кэшировать `running` и никогда не увидеть `false`.  
+**Что в консоли:** возможен только `Main done`, либо ещё и строка про остановку — поведение недетерминированно; иногда программа «вечно крутится».  
+**Как починить:** сделать `running` `volatile`, либо останавливать через `interrupt()` и проверять `Thread.interrupted()`.
+
+---
+
+### Задача E — ранний вывод из-под `ExecutorService` без ожидания
+
+```java
+import java.util.concurrent.*;
+public class EarlyExit {
+    public static void main(String[] args) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        final int[] sum = {0};
+        for (int i = 0; i < 1_000; i++) {
+            pool.submit(() -> sum[0]++); // небезопасно и без ожидания
+        }
+        pool.shutdown();                 // лишь запрещает новые задачи
+        System.out.println("sum = " + sum[0]);
+    }
+}
+```
+
+**Что не так:** нет ожидания завершения задач, да ещё и небезопасное обновление `sum`.  
+**Что в консоли:** часто `sum = 0` или маленькое значение, хотя задач 1000.  
+**Как починить:** `pool.awaitTermination(...)` или `invokeAll(...)`, и потокобезопасный счётчик (`AtomicInteger`/`LongAdder`).
+
+---
+
+## 7) Короткая памятка
+
+- `volatile` — про **видимость** и запрет некоторых переупорядочиваний; **не** делает `++` атомарным.
+- `Atomic*` — атомарные read‑modify‑write операции.
+- `LongAdder` — быстрые инкременты под высокой конкуренцией; сумма читается через `sum()`.
+- `synchronized` даёт **взаимное исключение** и отношения **happens‑before** между входом/выходом из монитора.
+- Жизненный цикл задач — через `ExecutorService` + `awaitTermination`/барьеры (`CountDownLatch`, `CyclicBarrier`).
+
+---
+
+_Готово. Можно копировать код и запускать._
+
 
 
