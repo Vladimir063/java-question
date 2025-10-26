@@ -2019,18 +2019,6 @@ hroughput в Apache Kafka означает пропускную способно
 
 ---
 
-## Пример: идемпотентная обработка через уникальный ключ
-
-```java
-for (ConsumerRecord<String, String> record : records) {
-    String eventId = record.key(); // уникальный бизнес-ключ
-    if (!processedEvents.contains(eventId)) {
-        process(record.value());
-        processedEvents.add(eventId);
-    } else {
-        log.info("Duplicate event skipped: {}", eventId);
-    }
-}
-
-
-[к оглавлению](#apache-kafka)
+## Сегменты
+Сегменты — это физические файлы на диске, в которых Kafka хранит данные каждой партиции.
+Когда сегмент достигает заданного размера или времени, Kafka закрывает его и создаёт новый, а старые может удалять или сжимать по политике хранения (retention).
