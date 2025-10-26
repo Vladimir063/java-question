@@ -1270,18 +1270,46 @@ if (example.ready) {     // volatile read
 
 ## ⚠️ Если порядок другой (volatile читается раньше)
 
+поток А
 ```java
-if (example.ready) {     // volatile read
-    // здесь можем увидеть старые значения x, y
+if (example.ready) {           // (1) volatile read
+    System.out.println(example.x + example.y);
 }
-example.x = 1;           // обычная запись
-example.y = 2;           // обычная запись
-example.ready = true;    // volatile write
+
+example.x = 1;                 // (2)
+example.y = 2;                 // (3)
+example.ready = true;          // (4) volatile write
 ```
 
-Если `ready` читается **до того, как завершены обычные записи**,  
-то поток B может увидеть `ready=true`, но `x` и `y` в старом состоянии.  
-Это классическая ошибка — «publication before initialization».
+И поток B:
+```java
+if (example.ready) {           // (5)
+    System.out.println(example.x + example.y);
+}
+```
+Возможный реальный порядок на процессоре (reordering):
+```java
+(1) volatile read (ready)
+(4) volatile write (ready=true)
+(2) x = 1
+(3) y = 2
+```
+
+Да — всё дело в том, что volatile read ничего не гарантирует для будущих действий потока.
+Он обеспечивает чтение актуального состояния, но не заставляет следующие записи (x, y)
+немедленно попасть в основную память или происходить “до” будущего volatile write.
+
+Только volatile write “публикует” всё, что было до него.
+
+volatile read не запрещает JVM и CPU переставить следующие обычные записи (x=1, y=2)
+перед volatile write.
+
+JMM гарантирует, что:
+
+операции до volatile write не “перепрыгнут” его;
+
+но операции после volatile read могут быть перемещены куда угодно,
+если это не влияет на поведение внутри потока.
 
 ---
 
